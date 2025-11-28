@@ -3,9 +3,15 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtGui import *
 from PyQt5.QtCore import *
 
-from gui import Ui_MainWindow
-from about import Ui_Dialog as About_Ui_Dialog
+import config
 
+# Import appropriate GUI based on config
+if config.USE_MODERN_GUI:
+    from gui_modern import Ui_MainWindow
+else:
+    from gui import Ui_MainWindow
+
+from about import Ui_Dialog as About_Ui_Dialog
 
 import serial_port_finder as spf
 import inverse_kinematics as ik
@@ -16,11 +22,23 @@ import config
 import parsing_patterns
 from command_builder import CommandBuilder, SerialCommandSender
 from robot_controller import RobotController
+from serial_manager import SerialManager
+from serial_thread import SerialThread
+from connection_manager import ConnectionManager, ConnectionState
+from movement_controller import MovementController, MovementParams, get_movement_params_from_gui
+from position_display_controller import PositionDisplayController
+from sequence_controller import SequenceController, JointPositions
+from ik_controller import IKController
+from fk_controller import FKController, JointValues
+from gripper_controller import GripperController
+from ui_state_manager import UIStateManager, ConnectionState as UIConnectionState, RobotState
+from serial_response_router import SerialResponseRouter
+from visualization_controller import VisualizationController
+from position_history_manager import PositionHistoryManager
 
 import serial
 import time
 import json
-import threading
 import logging
 import numpy as np
 
@@ -38,92 +56,7 @@ logger = logging.getLogger(__name__)
 # This application is designed for RepRapFirmware (RRF) only
 # All parsing patterns are now in parsing_patterns.py module
 
-# Thread-safe serial object with command queue
-class SerialManager:
-    def __init__(self):
-        self.serial = serial.Serial()
-        self.lock = threading.Lock()
-        # Non-blocking command queue (thread-safe)
-        self.command_queue = []
-        self.queue_lock = threading.Lock()
-
-    def write(self, data, priority=False):
-        """
-        Queue data to be written by serial thread (non-blocking)
-
-        Args:
-            data: Bytes to write
-            priority: If True, add to front of queue for immediate sending
-        """
-        with self.queue_lock:
-            if priority:
-                # Insert at beginning for immediate sending (status requests, etc)
-                self.command_queue.insert(0, data)
-            else:
-                # Append to end (normal commands)
-                self.command_queue.append(data)
-
-    def _write_internal(self, data):
-        """
-        Internal method: Actually write data to serial port (called by serial thread only)
-
-        Args:
-            data: Bytes to write
-
-        Returns:
-            True if write succeeded, False otherwise
-        """
-        with self.lock:
-            if self.serial.isOpen():
-                try:
-                    self.serial.write(data)
-                    return True
-                except (OSError, serial.SerialException) as e:
-                    logger.error(f"Error writing to serial port: {e}")
-                    return False
-        return False
-
-    def get_next_command(self):
-        """
-        Get next command from queue (thread-safe, non-blocking)
-
-        Returns:
-            Command bytes or None if queue is empty
-        """
-        with self.queue_lock:
-            if len(self.command_queue) > 0:
-                return self.command_queue.pop(0)
-        return None
-
-    def readline(self):
-        with self.lock:
-            if self.serial.isOpen():
-                return self.serial.readline()
-        return b''
-
-    def isOpen(self):
-        with self.lock:
-            return self.serial.isOpen()
-
-    def open(self):
-        with self.lock:
-            self.serial.open()
-
-    def close(self):
-        with self.lock:
-            if self.serial.isOpen():
-                self.serial.close()
-
-    def inWaiting(self):
-        with self.lock:
-            return self.serial.inWaiting()
-
-    def reset_input_buffer(self):
-        """Clear the input buffer to prevent stale data"""
-        with self.lock:
-            if self.serial.isOpen():
-                self.serial.reset_input_buffer()
-
+# Global serial manager instance
 s0 = SerialManager()
 
 class HistoryLineEdit(QtWidgets.QLineEdit):
@@ -193,15 +126,30 @@ class BifrostGUI(Ui_MainWindow):
         Ui_MainWindow.__init__(self)
         self.setupUi(dialog)
 
-        # Create connection signals (will connect after methods are defined)
-        self.connection_signals = ConnectionSignals()
+        # Create connection manager (handles serial connection lifecycle)
+        self.connection_manager = ConnectionManager(s0)
+        self.connection_manager.set_serial_thread_class(SerialThreadClass)
+
+        # Keep old connection_signals for backward compatibility
+        self.connection_signals = self.connection_manager  # ConnectionManager has same signals
 
         # Replace ConsoleInput with HistoryLineEdit for command history
         old_console_input = self.ConsoleInput
-        self.ConsoleInput = HistoryLineEdit(self.centralwidget)
-        self.ConsoleInput.setGeometry(old_console_input.geometry())
+        parent = old_console_input.parent()  # Keep it on the same panel/container
+        layout = parent.layout() if parent else None
+
+        self.ConsoleInput = HistoryLineEdit(parent)
         self.ConsoleInput.setObjectName("ConsoleInput")
-        old_console_input.setParent(None)
+
+        # If the old widget sat in a layout, replace it in-place
+        if layout is not None:
+            layout.replaceWidget(old_console_input, self.ConsoleInput)
+            self.ConsoleInput.setMinimumSize(old_console_input.minimumSize())
+            self.ConsoleInput.setMaximumSize(old_console_input.maximumSize())
+        else:
+            # Fallback for absolute positioning
+            self.ConsoleInput.setGeometry(old_console_input.geometry())
+
         old_console_input.deleteLater()
 
         # Using RepRapFirmware (RRF) - this is the only supported firmware
@@ -214,6 +162,7 @@ class BifrostGUI(Ui_MainWindow):
 
         # Track homing state
         self.is_homing = False
+        self.sync_commands_pending = False
 
         # Track jog mode state
         self.jog_mode_enabled = False
@@ -225,17 +174,34 @@ class BifrostGUI(Ui_MainWindow):
         self.robot_controller = RobotController()
         logger.info("RobotController initialized and integrated with GUI")
 
+        # Initialize movement controller (will set command_sender after full init)
+        self.movement_controller = MovementController(self.robot_controller, command_sender=None)
+
         self.getSerialPorts()
 
-        self.actionAbout.triggered.connect(self.launchAboutWindow)
-        self.actionExit.triggered.connect(self.close_application)
+        # Menu bar is optional (removed in modern GUI)
+        if hasattr(self, 'actionAbout'):
+            self.actionAbout.triggered.connect(self.launchAboutWindow)
+        if hasattr(self, 'actionExit'):
+            self.actionExit.triggered.connect(self.close_application)
+
+        # Connect settings button to About dialog (modern GUI)
+        if hasattr(self, 'SettingsButton'):
+            self.SettingsButton.pressed.connect(self.launchAboutWindow)
 
         # Setup embedded position history graph
-        self.setupPositionHistoryControls()
+        if not config.USE_MODERN_GUI:
+            # Classic GUI: Full controls in separate group box
+            self.setupPositionHistoryControls()
+        else:
+            # Modern GUI: Compact 3D view in robot state panel
+            self.setupModern3DVisualization()
 
         self.HomeButton.pressed.connect(self.sendHomingCycleCommand)
         self.ZeroPositionButton.pressed.connect(self.sendZeroPositionCommand)
         self.KillAlarmLockButton.pressed.connect(self.sendKillAlarmCommand)
+        self.PauseButton.pressed.connect(self.sendPauseCommand)
+        self.EmergencyStopButton.pressed.connect(self.sendEmergencyStopCommand)
 
         self.G0MoveRadioButton.clicked.connect(self.FeedRateBoxHide)
         self.G1MoveRadioButton.clicked.connect(self.FeedRateBoxHide)
@@ -276,6 +242,12 @@ class BifrostGUI(Ui_MainWindow):
         self.Inc1ButtonGripper.pressed.connect(self.Inc1Gripper)
         self.Inc10ButtonGripper.pressed.connect(self.Inc10Gripper)
 
+        # Gripper preset buttons (Close/Open) - connect to execute movement
+        if hasattr(self, 'gripper_close_btn'):
+            self.gripper_close_btn.clicked.connect(lambda: self.setGripperAndMove(0))
+        if hasattr(self, 'gripper_open_btn'):
+            self.gripper_open_btn.clicked.connect(lambda: self.setGripperAndMove(100))
+
         self.SerialPortRefreshButton.pressed.connect(self.getSerialPorts)
         self.ConnectButton.pressed.connect(self.connectSerial)
 
@@ -313,13 +285,61 @@ class BifrostGUI(Ui_MainWindow):
         self.IkIncButtonZ.setEnabled(True)
         self.IkDecButtonZ.setEnabled(True)
 
-        # Initialize Sequence Recorder
-        self.sequence_recorder = seq_rec.SequenceRecorder()
-        self.sequence_player = None  # Will be initialized when needed
+        # Initialize IK Controller with callbacks
+        self.ik_controller = IKController(
+            output_update_callback=self._onIKOutputUpdate,
+            spinbox_update_callback=self._onIKSpinboxUpdate,
+            style_update_callback=self._onIKStyleUpdate,
+            move_callback=self.FKMoveAll
+        )
+
+        # Initialize FK Controller with callbacks
+        self.fk_controller = FKController(
+            robot_controller=self.robot_controller,
+            command_sender=None,  # Will be set after full init
+            spinbox_update_callback=self._onFKSpinboxUpdate,
+            slider_update_callback=self._onFKSliderUpdate,
+            visualization_update_callback=self._onFKVisualizationUpdate,
+            get_movement_params_callback=lambda: CommandBuilder.get_movement_params(self),
+            no_connection_callback=self.noSerialConnection
+        )
+
+        # Initialize Gripper Controller with callbacks
+        self.gripper_controller = GripperController(
+            command_sender=None,  # Will be set after full init
+            spinbox_update_callback=self._onGripperSpinboxUpdate,
+            slider_update_callback=self._onGripperSliderUpdate,
+            no_connection_callback=self.noSerialConnection
+        )
+
+        # Initialize UI State Manager with callbacks
+        self.ui_state_manager = UIStateManager(
+            set_widget_enabled=self._setWidgetEnabled,
+            set_widget_style=self._setWidgetStyle,
+            set_widget_visible=self._setWidgetVisible,
+            set_widget_text=self._setWidgetText
+        )
+
+        # Initialize Sequence Controller with callbacks
+        self.sequence_controller = SequenceController(
+            command_sender=None,  # Will be set after full init
+            list_update_callback=self._onSequencePointAdded,
+            list_clear_callback=self._onSequenceCleared,
+            list_remove_callback=self._onSequencePointRemoved,
+            button_state_callback=self._onSequenceButtonStateChanged,
+            pause_text_callback=self._onSequencePauseTextChanged
+        )
+        # Backward compatibility references
+        self.sequence_recorder = self.sequence_controller.recorder
+        self.sequence_player = None
         self.is_playing_sequence = False
         self.sequence_timer = QtCore.QTimer()
         self.sequence_timer.timeout.connect(self.updateSequencePlayback)
-        self.setupSequenceControls()
+
+        # Only setup classic GUI sequence controls if not using modern GUI
+        # Modern GUI has these controls built into TEACH mode panel
+        if not config.USE_MODERN_GUI:
+            self.setupSequenceControls()
 
         # NOTE: Differential motor tracking, desired positions, and position validation
         # are now handled by RobotController. Local references kept for backward compatibility
@@ -335,18 +355,79 @@ class BifrostGUI(Ui_MainWindow):
         self.position_history = pos_hist.PositionHistory(max_size=config.POSITION_HISTORY_MAX_SIZE)
         logger.info(f"Position history initialized (max_size={config.POSITION_HISTORY_MAX_SIZE}, sample_rate=1/{config.POSITION_HISTORY_SAMPLE_RATE})")
 
+        # Initialize position display controller with callbacks
+        self.position_display_controller = PositionDisplayController(
+            robot_controller=self.robot_controller,
+            position_history=self.position_history,
+            gui_update_callback=self._onPositionUpdate,
+            state_update_callback=self._onStateUpdate,
+            endstop_update_callback=self._onEndstopUpdate
+        )
+
+        # Initialize Serial Response Router with callbacks
+        self.serial_response_router = SerialResponseRouter(
+            position_handler=self.updateFKPosDisplay,
+            endstop_handler=self.updateEndstopDisplay,
+            disconnect_handler=self._handleSerialDisconnect,
+            get_is_homing=lambda: self.is_homing,
+            set_homing_complete=self._onHomingComplete,
+            request_position_update=lambda: self.command_sender.send_if_connected("M114"),
+            set_sync_pending=lambda: setattr(self, 'sync_commands_pending', True),
+            trigger_sync=self._triggerCommandSync
+        )
+
+        # Initialize Visualization Controller with callbacks
+        self.visualization_controller = VisualizationController(
+            position_history=self.position_history,
+            update_canvas_callback=self._updateVisualizationCanvas,
+            reset_view_callback=self._resetVisualizationView,
+            get_trajectory_enabled=self._getTrajectoryEnabled,
+            get_auto_rotate_enabled=self._getAutoRotateEnabled,
+            get_time_window=self._getTimeWindow,
+            get_display_checkboxes=self._getDisplayCheckboxes,
+            reload_dh_parameters=self._reloadDHParameters
+        )
+
+        # Initialize Position History Manager with callbacks
+        self.position_history_manager = PositionHistoryManager(
+            position_history=self.position_history,
+            get_save_filename=self._getSaveFilename,
+            show_warning=self._showWarningDialog,
+            show_info=self._showInfoDialog,
+            show_error=self._showErrorDialog,
+            confirm_action=self._confirmAction
+        )
+
         # Setup endstop status displays
         self.setupEndstopDisplays()
 
         # Setup generic increment/decrement connections
         self.setupGenericControls()
 
-        # Connect connection signals now that methods are defined
-        self.connection_signals.success.connect(self._onConnectionSuccess)
-        self.connection_signals.error.connect(self._onConnectionError)
+        # Connect connection manager signals now that methods are defined
+        self.connection_manager.connected.connect(self._onConnectionSuccess)
+        self.connection_manager.error.connect(self._onConnectionError)
+        self.connection_manager.disconnected.connect(self.serialDisconnected)
 
         # Set console widget for command sender now that UI is fully initialized
         self.command_sender.console_output = self.ConsoleOutput
+
+        # Set command sender for movement controller now that it's configured
+        self.movement_controller.command_sender = self.command_sender
+
+        # Set command sender for sequence controller
+        self.sequence_controller.command_sender = self.command_sender
+
+        # Set command sender for FK controller
+        self.fk_controller.command_sender = self.command_sender
+
+        # Set command sender for gripper controller
+        self.gripper_controller.command_sender = self.command_sender
+
+        # Initialize ExecuteMovementButton visibility (modern GUI only)
+        # Button should be visible when jog mode is off (default state)
+        if hasattr(self, 'ExecuteMovementButton'):
+            self.ExecuteMovementButton.setVisible(True)
 
     def setupGenericControls(self):
         """
@@ -395,92 +476,24 @@ class BifrostGUI(Ui_MainWindow):
             logger.warning(f"Unknown joint name: {joint_name}")
 
     def FKSliderUpdate(self, joint_name, value):
-        """Generic slider update handler - updates spinbox from slider"""
-        if joint_name in self.joint_spinboxes:
-            val = value / 10.0
-            self.joint_spinboxes[joint_name].setValue(val)
+        """Generic slider update handler - updates spinbox from slider via FK controller"""
+        self.fk_controller.slider_changed(joint_name, value)
 
     def FKSpinBoxUpdate(self, joint_name, value):
-        """Generic spinbox update handler - updates slider from spinbox"""
-        slider = getattr(self, f'FKSlider{joint_name}', None)
-        if slider:
-            val = int(value * 10)
-            slider.setValue(val)
+        """Generic spinbox update handler - updates slider from spinbox via FK controller"""
+        self.fk_controller.spinbox_changed(joint_name, value)
 
     def FKMoveJoint(self, joint_name):
         """
-        Generic joint movement handler
-        Handles simple joints, coupled motors, and differential kinematics
+        Generic joint movement handler - delegates to FK controller.
+        Handles simple joints, coupled motors, and differential kinematics.
         """
-        if joint_name not in self.joint_config:
+        if joint_name not in self.joint_spinboxes:
             logger.warning(f"Unknown joint: {joint_name}")
             return
 
-        config = self.joint_config[joint_name]
         joint_value = self.joint_spinboxes[joint_name].value()
-
-        # Handle based on joint type
-        if config['type'] in ('simple', 'coupled'):
-            # Simple and coupled use same logic (just different logging)
-            self._FKMoveSimple(joint_name, joint_value, config)
-        elif config['type'] == 'differential':
-            self._FKMoveDifferential(joint_name, joint_value, config)
-
-    def _FKMoveSimple(self, joint_name, joint_value, config):
-        """Move a simple single-axis joint (also handles coupled motors)"""
-        # Log with appropriate detail based on joint type
-        if config['type'] == 'coupled':
-            logger.info(f"{config['log_name']} commanded to: {joint_value}° -> Axis: {config['axis']} (Drives {config['drives']})")
-        else:
-            logger.info(f"{config['log_name']} commanded to: {joint_value}° -> Axis: {config['axis']}")
-
-        # Build and send command (identical for simple and coupled)
-        movement_type, feedrate = CommandBuilder.get_movement_params(self)
-        command = CommandBuilder.build_single_axis_command(
-            movement_type, config['axis'], joint_value, feedrate
-        )
-
-        # Send command
-        if not self.command_sender.send_if_connected(command, error_callback=self.noSerialConnection):
-            logger.warning(f"{joint_name} move attempted but serial not connected")
-
-    def _FKMoveDifferential(self, joint_name, joint_value, config):
-        """
-        Move a differential joint (Art5/Art6)
-        NOW USES: RobotController for differential calculations
-        """
-        # Check if we have valid position feedback using RobotController
-        if not self.robot_controller.check_differential_initialized():
-            logger.warning("No position feedback received yet - differential control may be inaccurate!")
-            logger.warning("Wait for position update or home the robot first")
-
-        # Calculate new motor positions using RobotController
-        motor_v, motor_w, kept_value = self.robot_controller.calculate_differential_move(
-            joint_name, joint_value
-        )
-
-        # Update tracked positions in controller
-        self.robot_controller.update_differential_motors(motor_v, motor_w)
-
-        # Keep local references for backward compatibility
-        self.current_motor_v = motor_v
-        self.current_motor_w = motor_w
-        if joint_name == 'Art5':
-            self.desired_art5 = joint_value
-        else:
-            self.desired_art6 = joint_value
-
-        # Build command using command builder (both V and W motors)
-        movement_type, feedrate = CommandBuilder.get_movement_params(self)
-        command = CommandBuilder.build_axis_command(
-            movement_type,
-            {"V": motor_v, "W": motor_w},
-            feedrate
-        )
-
-        # Send command
-        if not self.command_sender.send_if_connected(command, error_callback=self.noSerialConnection):
-            logger.warning(f"{joint_name} move attempted but serial not connected")
+        self.fk_controller.move_joint(joint_name, joint_value)
 
     def close_application(self):
         # Properly cleanup serial connection and thread
@@ -500,8 +513,7 @@ class BifrostGUI(Ui_MainWindow):
         if self.command_sender.send_if_connected("G28"):
             # Update button state to indicate homing in progress
             self.is_homing = True
-            self.HomeButton.setEnabled(False)
-            self.HomeButton.setText("Homing...")
+            self.ui_state_manager.update_homing_state(True)
 
     def sendZeroPositionCommand(self):
         """Send command to move all axes to zero position"""
@@ -514,6 +526,18 @@ class BifrostGUI(Ui_MainWindow):
     def sendKillAlarmCommand(self):
         """Send M999 command (RRF: Clear emergency stop / reset)"""
         self.command_sender.send_if_connected("M999")
+
+    def sendPauseCommand(self):
+        """Send M410 command (RRF: Quick stop - pause movement)"""
+        if self.command_sender.send_if_connected("M410"):
+            logger.warning("PAUSE command sent (M410) - Movement stopped")
+
+    def sendEmergencyStopCommand(self):
+        """Send M112 command (RRF: Emergency stop - requires M999 to reset)"""
+        if self.command_sender.send_if_connected("M112"):
+            logger.error("EMERGENCY STOP activated (M112) - System halted! Press 'Clear E-Stop' to resume.")
+            # Update UI to show emergency stop state
+            self.updateCurrentState("Alarm")
 
     def FeedRateBoxHide(self):
         if self.G1MoveRadioButton.isChecked():
@@ -539,6 +563,12 @@ class BifrostGUI(Ui_MainWindow):
 
         # Update state
         self.jog_mode_enabled = enabled
+
+        # Sync with IK controller
+        self.ik_controller.set_jog_mode(enabled)
+
+        # Sync with FK controller
+        self.fk_controller.set_jog_mode(enabled)
 
         # Update visual feedback
         self._updateJogModeVisuals(enabled)
@@ -574,49 +604,12 @@ class BifrostGUI(Ui_MainWindow):
 
     def _updateJogModeVisuals(self, enabled):
         """
-        Update visual feedback for jog mode state
+        Update visual feedback for jog mode state - delegates to UIStateManager
 
         Args:
             enabled: True if jog mode is enabled, False otherwise
         """
-        if enabled:
-            # Highlight jog mode checkbox with warning color
-            self.JogModeCheckBox.setStyleSheet(
-                f"color: rgb(200, 80, 0); background-color: {config.JOG_MODE_VISUAL_HIGHLIGHT}; "
-                "padding: 3px; border-radius: 3px; font-weight: bold;"
-            )
-
-            # Disable/dim all "Go" buttons (they're not needed in jog mode)
-            for joint in ['Art1', 'Art2', 'Art3', 'Art4', 'Art5', 'Art6']:
-                go_button = getattr(self, f'FKGoButton{joint}')
-                go_button.setEnabled(False)
-                go_button.setStyleSheet("background-color: rgb(200, 200, 200);")
-
-            # Disable "Go All" button
-            self.FKGoAllButton.setEnabled(False)
-            self.FKGoAllButton.setStyleSheet("background-color: rgb(200, 200, 200);")
-
-            # Disable gripper go button
-            self.GoButtonGripper.setEnabled(False)
-            self.GoButtonGripper.setStyleSheet("background-color: rgb(200, 200, 200);")
-
-        else:
-            # Restore normal checkbox appearance
-            self.JogModeCheckBox.setStyleSheet("color: rgb(200, 80, 0); font-weight: bold;")
-
-            # Re-enable all "Go" buttons
-            for joint in ['Art1', 'Art2', 'Art3', 'Art4', 'Art5', 'Art6']:
-                go_button = getattr(self, f'FKGoButton{joint}')
-                go_button.setEnabled(True)
-                go_button.setStyleSheet("")
-
-            # Re-enable "Go All" button
-            self.FKGoAllButton.setEnabled(True)
-            self.FKGoAllButton.setStyleSheet("")
-
-            # Re-enable gripper go button
-            self.GoButtonGripper.setEnabled(True)
-            self.GoButtonGripper.setStyleSheet("")
+        self.ui_state_manager.update_jog_mode(enabled)
 
 
 # OLD FK methods removed - replaced with generic handlers above
@@ -624,106 +617,109 @@ class BifrostGUI(Ui_MainWindow):
     # Saved ~290 lines of duplicate code via dynamic signal binding
 
 #FK Every Articulation Functions
+    def syncCommandsToActual(self):
+        """Sync command spinbox values with actual robot position (e.g., after homing)"""
+        try:
+            # Get actual positions from robot controller
+            positions = self.robot_controller.get_current_positions()
+            if positions:
+                self.SpinBoxArt1.setValue(positions.get('Art1', 0.0))
+                self.SpinBoxArt2.setValue(positions.get('Art2', 0.0))
+                self.SpinBoxArt3.setValue(positions.get('Art3', 0.0))
+                self.SpinBoxArt4.setValue(positions.get('Art4', 0.0))
+                self.SpinBoxArt5.setValue(positions.get('Art5', 0.0))
+                self.SpinBoxArt6.setValue(positions.get('Art6', 0.0))
+                logger.info("Synced command spinboxes with actual position")
+        except Exception as e:
+            logger.warning(f"Could not sync commands to actual: {e}")
+
+    def on_dh_parameters_changed(self):
+        """Handle DH parameters changed signal - reload FK parameters"""
+        try:
+            import forward_kinematics as fk
+            fk.reload_dh_parameters()
+            # Exit preview mode since parameters are now saved
+            self.visualization_controller.dh_preview_mode = False
+            logger.info("DH parameters saved and reloaded in FK module")
+        except Exception as e:
+            logger.error(f"Error reloading DH parameters: {e}")
+
+    def on_dh_preview_changed(self):
+        """Handle DH preview signal - update visualization with current DH panel values"""
+        try:
+            if hasattr(self, 'dh_panel') and hasattr(self, 'position_canvas'):
+                # Enable DH preview mode to prevent timer-based updates from overwriting
+                self.visualization_controller.enter_dh_preview_mode()
+
+                # Get current parameters from DH panel
+                params = self.dh_panel.get_parameters()
+                # Update visualization with preview
+                self.position_canvas.preview_dh_parameters(params)
+                logger.debug("DH preview updated")
+        except Exception as e:
+            logger.error(f"Error updating DH preview: {e}")
+
     def FKMoveAll(self):
-        """Move all joints simultaneously (DIFFERENTIAL MECHANISM: Art5 & Art6 use differential kinematics)"""
-        # Get joint values
-        art1 = self.SpinBoxArt1.value()
-        art2 = self.SpinBoxArt2.value()
-        art3 = self.SpinBoxArt3.value()
-        art4 = self.SpinBoxArt4.value()
-        art5 = self.SpinBoxArt5.value()
-        art6 = self.SpinBoxArt6.value()
-
-        # Calculate differential motor positions using helper
-        motor_v, motor_w = diff_kin.DifferentialKinematics.joint_to_motor(art5, art6)
-
-        logger.info(f"MoveAll: Art5={art5}° Art6={art6}° -> Differential: V={motor_v:.2f}° W={motor_w:.2f}°")
-
-        # Build command using command builder
-        movement_type, feedrate = CommandBuilder.get_movement_params(self)
-        # Map all axes: X=Art1, Y=Art2(coupled), Z=Art3, U=Art4, V/W=differential(Art5,Art6)
-        command = CommandBuilder.build_axis_command(
-            movement_type,
-            {"X": art1, "Y": art2, "Z": art3, "U": art4, "V": motor_v, "W": motor_w},
-            feedrate
+        """Move all joints simultaneously - delegates to FK controller"""
+        # Get joint values from spinboxes
+        joint_values = JointValues(
+            art1=self.SpinBoxArt1.value(),
+            art2=self.SpinBoxArt2.value(),
+            art3=self.SpinBoxArt3.value(),
+            art4=self.SpinBoxArt4.value(),
+            art5=self.SpinBoxArt5.value(),
+            art6=self.SpinBoxArt6.value()
         )
 
-        # Send command
-        self.command_sender.send_if_connected(command, error_callback=self.noSerialConnection)
+        # Delegate to FK controller
+        self.fk_controller.move_all(joint_values)
 
-# Gripper Functions
-    @staticmethod
-    def _gripper_percent_to_pwm(percent):
-        """Convert gripper percentage (0-100) to PWM value (0-255)"""
-        return (config.GRIPPER_PWM_MAX / config.GRIPPER_PERCENT_MAX) * percent
-
+# Gripper Functions - delegate to GripperController
     def MoveGripper(self):
-        """Move gripper to specified position"""
-        pwm_value = self._gripper_percent_to_pwm(self.SpinBoxGripper.value())
-        # Map 0-255 PWM range to 0-180 servo angle for RepRapFirmware M280 command
-        servo_angle = int((pwm_value / 255.0) * 180.0)
-        command = f"M280 P0 S{servo_angle}"
-
-        # Send command
-        self.command_sender.send_if_connected(command, error_callback=self.noSerialConnection)
+        """Move gripper to specified position - delegates to controller"""
+        self.gripper_controller.move(self.SpinBoxGripper.value())
 
     def SliderUpdateGripper(self):
-        val=self.SliderGripper.value()
-        self.SpinBoxGripper.setValue(val)
+        """Slider changed - update spinbox via controller"""
+        self.gripper_controller.slider_changed(self.SliderGripper.value())
+
     def SpinBoxUpdateGripper(self):
-        val=int(self.SpinBoxGripper.value())
-        self.SliderGripper.setValue(val)
+        """Spinbox changed - update slider via controller"""
+        self.gripper_controller.spinbox_changed(self.SpinBoxGripper.value())
+
     def Dec10Gripper(self):
         self.adjustJointValue('Gripper', -10)
+
     def Dec1Gripper(self):
         self.adjustJointValue('Gripper', -1)
+
     def Inc1Gripper(self):
         self.adjustJointValue('Gripper', 1)
+
     def Inc10Gripper(self):
         self.adjustJointValue('Gripper', 10)
 
+    def setGripperAndMove(self, value):
+        """Set gripper to specific value and execute movement - delegates to controller"""
+        preset = 'closed' if value == 0 else 'open'
+        self.gripper_controller.move_to_preset(preset)
+
 # Inverse Kinematics Functions
     def _calculateIKDeferred(self):
-        """Calculate 6-DOF inverse kinematics for current target position (debounced)"""
+        """
+        Calculate 6-DOF inverse kinematics for current target position (debounced).
+        Delegates to IKController.
+        """
         x = self.IKInputSpinBoxX.value()
         y = self.IKInputSpinBoxY.value()
         z = self.IKInputSpinBoxZ.value()
 
-        logger.info(f"IK 6-DOF: Calculating for target X={x}, Y={y}, Z={z}")
-
-        # Solve full 6-DOF IK with default tool-down orientation
-        # Future enhancement: add orientation input controls
-        solution = ik.solve_ik_full(x, y, z, roll=0, pitch=-np.pi/2, yaw=0)
-
-        # Update output displays
-        if solution.valid:
-            self.IkOutputValueX.setText(f"{solution.q1:.2f}º")
-            self.IkOutputValueY.setText(f"{solution.q2:.2f}º")
-            self.IkOutputValueZ.setText(f"{solution.q3:.2f}º")
-
-            # Update FK spinboxes with all 6 calculated joint angles
-            self.SpinBoxArt1.setValue(solution.q1)
-            self.SpinBoxArt2.setValue(solution.q2)
-            self.SpinBoxArt3.setValue(solution.q3)
-            self.SpinBoxArt4.setValue(solution.q4)
-            self.SpinBoxArt5.setValue(solution.q5)
-            self.SpinBoxArt6.setValue(solution.q6)
-
-            # Style valid solution
-            self.IkOutputValueFrame.setStyleSheet("background-color:rgb(200, 255, 200)")  # Light green
-            logger.info(f"IK 6-DOF: Valid solution - q1={solution.q1:.2f}°, q2={solution.q2:.2f}°, q3={solution.q3:.2f}°, q4={solution.q4:.2f}°, q5={solution.q5:.2f}°, q6={solution.q6:.2f}°")
-        else:
-            self.IkOutputValueX.setText("--")
-            self.IkOutputValueY.setText("--")
-            self.IkOutputValueZ.setText("--")
-
-            # Style invalid solution
-            self.IkOutputValueFrame.setStyleSheet("background-color:rgb(255, 200, 200)")  # Light red
-            logger.warning(f"IK 6-DOF: Invalid solution - {solution.error_msg}")
+        # Delegate to controller - it will update GUI via callbacks
+        self.ik_controller.calculate_and_update(x, y, z)
 
     def adjustIKValue(self, axis, delta):
         """
-        Generic method to adjust IK input value by a delta
+        Generic method to adjust IK input value by a delta.
 
         Args:
             axis: Axis letter ('X', 'Y', 'Z')
@@ -733,24 +729,15 @@ class BifrostGUI(Ui_MainWindow):
         new_value = spinbox.value() + delta
         spinbox.setValue(new_value)
 
-        # JOG MODE: If jog mode is enabled, execute movement immediately after IK calculation
-        # The IK calculation will be triggered by the spinbox value change (debounced)
-        # Once IK updates the FK spinboxes, we execute FKMoveAll to move all joints
+        # JOG MODE: If jog mode is enabled, execute movement after IK calculation
         if self.jog_mode_enabled:
             # Wait briefly for IK calculation to complete (debounce timer), then execute
-            # Use a single-shot timer to execute after IK calculation
             QtCore.QTimer.singleShot(100, self._executeIKJogMove)
             logger.debug(f"[JOG MODE] IK {axis} jogged to {new_value}mm, executing move after IK calculation")
 
     def _executeIKJogMove(self):
-        """Execute movement after IK calculation in jog mode (called by timer)"""
-        if self.jog_mode_enabled:
-            # Check if IK solution is valid (green background)
-            if "200, 255, 200" in self.IkOutputValueFrame.styleSheet():
-                self.FKMoveAll()
-                logger.debug("[JOG MODE] IK solution valid, executing FKMoveAll")
-            else:
-                logger.warning("[JOG MODE] IK solution invalid, movement not executed")
+        """Execute movement after IK calculation in jog mode (called by timer)."""
+        self.ik_controller.execute_jog_move_if_valid()
 
 # Sequence Recorder Functions
     def setupSequenceControls(self):
@@ -936,219 +923,137 @@ class BifrostGUI(Ui_MainWindow):
 
         logger.info(f"Embedded 3D robot visualization initialized ({config.GRAPH_UPDATE_INTERVAL_MS}ms update interval)")
 
+    def setupModern3DVisualization(self):
+        """Setup 3D visualization for modern GUI (compact controls in robot state panel)"""
+        # Canvas is already created in gui_modern.py and mapped via self.position_canvas
+        # Just need to start the update timer
+
+        # Start auto-update timer for 3D visualization
+        # OPTIMIZED: matplotlib rendering is expensive
+        # Dirty flag pattern in visualizer prevents unnecessary redraws
+        self.graph_update_timer = QtCore.QTimer()
+        self.graph_update_timer.timeout.connect(self.updateModern3DVisualization)
+        self.graph_update_timer.start(config.GRAPH_UPDATE_INTERVAL_MS)
+
+        # Link calibration panel to GUI instance (if it exists)
+        if hasattr(self, 'calibration_panel') and self.calibration_panel:
+            self.calibration_panel.gui_instance = self
+            logger.info("Calibration panel linked to GUI instance")
+
+        # Connect DH panel signals (deferred to ensure all widgets are ready)
+        # Use QTimer.singleShot to connect after event loop processes pending events
+        QtCore.QTimer.singleShot(100, self._connectDHPanelSignals)
+
+        logger.info(f"Modern 3D visualization initialized ({config.GRAPH_UPDATE_INTERVAL_MS}ms update interval)")
+
+    def _connectDHPanelSignals(self):
+        """Connect DH panel signals - deferred to ensure widgets are ready"""
+        if hasattr(self, 'dh_panel') and self.dh_panel:
+            self.dh_panel.parameters_changed.connect(self.on_dh_parameters_changed)
+            self.dh_panel.preview_changed.connect(self.on_dh_preview_changed)
+            logger.info("DH panel signals connected for live preview")
+        else:
+            logger.warning("DH panel not found, live preview disabled")
+
+        # Connect mode switching to exit DH preview mode when leaving DH panel
+        if hasattr(self, 'mode_selector') and self.mode_selector:
+            self.mode_selector.mode_changed.connect(self._onModeChanged)
+
+    def _onModeChanged(self, mode_index):
+        """Handle mode switching - exit DH preview mode when leaving DH panel"""
+        # Delegate to visualization controller
+        self.visualization_controller.on_mode_changed(mode_index, dh_mode_index=5)
+
+    def updateModern3DVisualization(self):
+        """Update the modern GUI 3D visualization - delegates to VisualizationController"""
+        if not hasattr(self, 'position_canvas'):
+            logger.warning("updateModern3DVisualization: position_canvas not found")
+            return
+
+        self.visualization_controller.update_modern_visualization()
+
     def updateEmbeddedGraph(self):
-        """Update the embedded 3D robot visualization"""
+        """Update the embedded 3D robot visualization - delegates to VisualizationController"""
         if not hasattr(self, 'position_canvas'):
             return
 
-        # Get time window from spinbox
-        window_size = self.timeWindowSpinBox.value()
-
-        # Get display options from checkboxes
-        options = {
-            key: checkbox.isChecked()
-            for key, checkbox in self.displayCheckboxes.items()
-        }
-
-        # Update the 3D visualization
-        self.position_canvas.update_visualization(self.position_history, window_size, options)
+        self.visualization_controller.update_embedded_visualization()
 
     def resetVisualizationView(self):
-        """Reset 3D visualization view to default isometric angle"""
-        if hasattr(self, 'position_canvas'):
-            self.position_canvas.reset_view()
-            logger.info("3D view reset to isometric")
+        """Reset 3D visualization view to default - delegates to VisualizationController"""
+        self.visualization_controller.reset_view()
 
     def exportPositionHistory(self):
-        """Export position history to CSV"""
-        if len(self.position_history) == 0:
-            msgBox = QtWidgets.QMessageBox()
-            msgBox.setIcon(QtWidgets.QMessageBox.Warning)
-            msgBox.setText("No position history to export.")
-            msgBox.setWindowTitle("No Data")
-            msgBox.exec_()
-            return
-
-        from datetime import datetime
-        default_filename = f"position_history_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-
-        filename, _ = QtWidgets.QFileDialog.getSaveFileName(
-            None,
-            "Export Position History",
-            default_filename,
-            "CSV Files (*.csv);;All Files (*)"
-        )
-
-        if filename:
-            if self.position_history.export_to_csv(filename):
-                logger.info(f"Position history exported to {filename}")
-                msgBox = QtWidgets.QMessageBox()
-                msgBox.setIcon(QtWidgets.QMessageBox.Information)
-                msgBox.setText(f"Position history exported successfully to:\n{filename}\n\n{len(self.position_history)} snapshots saved.")
-                msgBox.setWindowTitle("Export Successful")
-                msgBox.exec_()
-            else:
-                msgBox = QtWidgets.QMessageBox()
-                msgBox.setIcon(QtWidgets.QMessageBox.Critical)
-                msgBox.setText("Failed to export position history.")
-                msgBox.setWindowTitle("Export Failed")
-                msgBox.exec_()
+        """Export position history to CSV - delegates to PositionHistoryManager"""
+        self.position_history_manager.export_to_csv()
 
     def clearPositionHistory(self):
-        """Clear position history after confirmation"""
-        msgBox = QtWidgets.QMessageBox()
-        msgBox.setIcon(QtWidgets.QMessageBox.Question)
-        msgBox.setText(f"Clear all position history?\n\nThis will delete {len(self.position_history)} recorded snapshots.")
-        msgBox.setWindowTitle("Clear History")
-        msgBox.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
-        msgBox.setDefaultButton(QtWidgets.QMessageBox.No)
-
-        if msgBox.exec_() == QtWidgets.QMessageBox.Yes:
-            self.position_history.clear()
-            logger.info("Position history cleared by user")
-
-            infoBox = QtWidgets.QMessageBox()
-            infoBox.setIcon(QtWidgets.QMessageBox.Information)
-            infoBox.setText("Position history cleared.")
-            infoBox.setWindowTitle("Cleared")
-            infoBox.exec_()
+        """Clear position history after confirmation - delegates to PositionHistoryManager"""
+        self.position_history_manager.clear_history()
 
     def recordSequencePoint(self):
-        """Record current joint positions to sequence"""
-        q1 = self.SpinBoxArt1.value()
-        q2 = self.SpinBoxArt2.value()
-        q3 = self.SpinBoxArt3.value()
-        q4 = self.SpinBoxArt4.value()
-        q5 = self.SpinBoxArt5.value()
-        q6 = self.SpinBoxArt6.value()
-        gripper = self.SpinBoxGripper.value()
+        """Record current joint positions to sequence. Delegates to SequenceController."""
+        positions = JointPositions(
+            q1=self.SpinBoxArt1.value(),
+            q2=self.SpinBoxArt2.value(),
+            q3=self.SpinBoxArt3.value(),
+            q4=self.SpinBoxArt4.value(),
+            q5=self.SpinBoxArt5.value(),
+            q6=self.SpinBoxArt6.value(),
+            gripper=self.SpinBoxGripper.value()
+        )
         delay = self.sequenceDelaySpinBox.value()
 
-        if not self.sequence_recorder.is_recording:
-            self.sequence_recorder.start_recording("Current Sequence")
+        # Update movement params from GUI before recording
+        movement_type, feedrate = CommandBuilder.get_movement_params(self)
+        self.sequence_controller.set_movement_params(movement_type, feedrate)
 
-        self.sequence_recorder.record_point(q1, q2, q3, q4, q5, q6, gripper, delay)
-
-        # Update list display
-        point_text = f"Point {len(self.sequence_recorder.current_sequence)}: q1={q1:.1f}° q2={q2:.1f}° q3={q3:.1f}° delay={delay:.1f}s"
-        self.sequencePointsList.addItem(point_text)
-
-        logger.info(f"Recorded point: {point_text}")
+        self.sequence_controller.record_point(positions, delay)
 
     def deleteSequencePoint(self):
-        """Delete selected point from sequence"""
+        """Delete selected point from sequence. Delegates to SequenceController."""
         current_row = self.sequencePointsList.currentRow()
-        if current_row >= 0:
-            self.sequence_recorder.current_sequence.remove_point(current_row)
-            self.sequencePointsList.takeItem(current_row)
-            logger.info(f"Deleted point {current_row + 1}")
+        self.sequence_controller.delete_point(current_row)
 
     def clearSequence(self):
-        """Clear all points from sequence"""
-        self.sequence_recorder.current_sequence.clear()
-        self.sequencePointsList.clear()
-        logger.info("Cleared all sequence points")
+        """Clear all points from sequence. Delegates to SequenceController."""
+        self.sequence_controller.clear_sequence()
 
     def playSequence(self):
-        """Play the recorded sequence"""
-        if len(self.sequence_recorder.current_sequence) == 0:
-            logger.warning("Cannot play empty sequence")
-            return
+        """Play the recorded sequence. Delegates to SequenceController."""
+        # Update movement params from GUI before playback
+        movement_type, feedrate = CommandBuilder.get_movement_params(self)
+        self.sequence_controller.set_movement_params(movement_type, feedrate)
 
-        if self.is_playing_sequence:
-            logger.warning("Sequence already playing")
-            return
-
-        # Create player with movement callback
-        self.sequence_player = seq_rec.SequencePlayer(self.executeSequenceMove)
-
-        # Get playback parameters
+        # Get playback parameters from GUI
         speed = self.sequenceSpeedSpinBox.value()
         loop = self.sequenceLoopCheckBox.isChecked()
 
-        # Start playback (non-blocking)
-        self.sequence_player.start_playback(
-            self.sequence_recorder.current_sequence,
-            speed=speed,
-            loop=loop
-        )
-
-        # Update button states
-        self.sequencePlayButton.setEnabled(False)
-        self.sequencePauseButton.setEnabled(True)
-        self.sequenceStopButton.setEnabled(True)
-        self.is_playing_sequence = True
-
-        # Start timer to update playback (interval from config)
-        self.sequence_timer.start(config.SEQUENCE_TIMER_INTERVAL)
-
-        logger.info(f"Started sequence playback (speed={speed}x, loop={loop})")
+        if self.sequence_controller.start_playback(speed=speed, loop=loop):
+            self.is_playing_sequence = True
+            self.sequence_timer.start(config.SEQUENCE_TIMER_INTERVAL)
 
     def updateSequencePlayback(self):
-        """Called by QTimer to advance sequence playback (thread-safe)"""
-        if not self.sequence_player:
-            self.sequence_timer.stop()
-            return
-
-        should_continue, current, total = self.sequence_player.playNextPoint()
+        """Called by QTimer to advance sequence playback."""
+        should_continue, current, total = self.sequence_controller.update_playback()
 
         if not should_continue:
-            # Playback finished
-            self.stopSequence()
-            logger.info("Sequence playback completed")
+            self.sequence_timer.stop()
+            self.is_playing_sequence = False
 
     def pauseSequence(self):
-        """Pause/resume sequence playback"""
-        if self.sequence_player:
-            if self.sequence_player.is_paused:
-                self.sequence_player.resume()
-                self.sequencePauseButton.setText("Pause")
-            else:
-                self.sequence_player.pause()
-                self.sequencePauseButton.setText("Resume")
+        """Pause/resume sequence playback. Delegates to SequenceController."""
+        self.sequence_controller.pause_playback()
 
     def stopSequence(self):
-        """Stop sequence playback"""
+        """Stop sequence playback. Delegates to SequenceController."""
         self.sequence_timer.stop()
-
-        if self.sequence_player:
-            self.sequence_player.stop()
-
-        self.sequencePlayButton.setEnabled(True)
-        self.sequencePauseButton.setEnabled(False)
-        self.sequencePauseButton.setText("Pause")
-        self.sequenceStopButton.setEnabled(False)
+        self.sequence_controller.stop_playback()
         self.is_playing_sequence = False
 
-        logger.info("Stopped sequence playback")
-
-    def executeSequenceMove(self, q1, q2, q3, q4, q5, q6, gripper):
-        """Execute a single movement during sequence playback"""
-        logger.info(f"Executing sequence move: q1={q1:.1f}°, q2={q2:.1f}°, q3={q3:.1f}°, q4={q4:.1f}°, q5={q5:.1f}°, q6={q6:.1f}°, grip={gripper}")
-
-        # DIFFERENTIAL MECHANISM: Calculate motor positions using helper
-        motor_v, motor_w = diff_kin.DifferentialKinematics.joint_to_motor(q5, q6)
-
-        # Build and send movement command
-        movement_type, feedrate = CommandBuilder.get_movement_params(self)
-        command = CommandBuilder.build_axis_command(
-            movement_type,
-            {"X": q1, "Y": q2, "Z": q3, "U": q4, "V": motor_v, "W": motor_w},
-            feedrate
-        )
-        self.command_sender.send(command, show_in_console=False)  # Don't spam console during playback
-
-        # Move gripper if needed
-        if gripper > 0:
-            pwm_value = self._gripper_percent_to_pwm(gripper)
-            # Map 0-255 PWM range to 0-180 servo angle for RepRapFirmware M280 command
-            servo_angle = int((pwm_value / 255.0) * 180.0)
-            gripper_cmd = f"M280 P0 S{servo_angle}"
-            self.command_sender.send(gripper_cmd, show_in_console=False)
-
     def saveSequence(self):
-        """Save sequence to file"""
-        if len(self.sequence_recorder.current_sequence) == 0:
+        """Save sequence to file."""
+        if self.sequence_controller.sequence_length == 0:
             logger.warning("Cannot save empty sequence")
             return
 
@@ -1160,7 +1065,7 @@ class BifrostGUI(Ui_MainWindow):
         )
 
         if filename:
-            if self.sequence_recorder.save_sequence(filename):
+            if self.sequence_controller.save_sequence(filename):
                 logger.info(f"Saved sequence to {filename}")
                 msgBox = QtWidgets.QMessageBox()
                 msgBox.setIcon(QtWidgets.QMessageBox.Information)
@@ -1175,7 +1080,7 @@ class BifrostGUI(Ui_MainWindow):
                 msgBox.exec_()
 
     def loadSequence(self):
-        """Load sequence from file"""
+        """Load sequence from file."""
         filename, _ = QtWidgets.QFileDialog.getOpenFileName(
             None,
             "Load Sequence",
@@ -1184,16 +1089,8 @@ class BifrostGUI(Ui_MainWindow):
         )
 
         if filename:
-            sequence = self.sequence_recorder.load_sequence(filename)
+            sequence = self.sequence_controller.load_sequence(filename)
             if sequence:
-                self.sequence_recorder.set_current_sequence(sequence)
-
-                # Update list display
-                self.sequencePointsList.clear()
-                for i, point in enumerate(sequence.points):
-                    point_text = f"Point {i+1}: q1={point.q1:.1f}° q2={point.q2:.1f}° q3={point.q3:.1f}° delay={point.delay:.1f}s"
-                    self.sequencePointsList.addItem(point_text)
-
                 logger.info(f"Loaded sequence '{sequence.name}' with {len(sequence)} points")
                 msgBox = QtWidgets.QMessageBox()
                 msgBox.setIcon(QtWidgets.QMessageBox.Information)
@@ -1209,14 +1106,14 @@ class BifrostGUI(Ui_MainWindow):
 
 # Serial Connection functions
     def getSerialPorts(self):
+        """Refresh available serial ports in combo box"""
         self.SerialPortComboBox.clear()
-        available_ports = spf.serial_ports()
+        available_ports = self.connection_manager.get_available_ports()
         self.SerialPortComboBox.addItems(available_ports)
 
         # Auto-detect and select the robot's COM port
-        robot_port = spf.get_robot_port()
+        robot_port = self.connection_manager.get_recommended_port()
         if robot_port:
-            # Find the index of the detected port and select it
             index = self.SerialPortComboBox.findText(robot_port)
             if index >= 0:
                 self.SerialPortComboBox.setCurrentIndex(index)
@@ -1227,8 +1124,9 @@ class BifrostGUI(Ui_MainWindow):
             logger.info("No robot port auto-detected, please select manually")
 
     def connectSerial(self):
+        """Connect to or disconnect from serial port"""
         # Check if already connected - if so, disconnect
-        if s0.isOpen():
+        if self.connection_manager.is_connected:
             self.disconnectSerial()
             return
 
@@ -1246,73 +1144,30 @@ class BifrostGUI(Ui_MainWindow):
         self.RobotStateDisplay.setText("Connecting...")
         self.RobotStateDisplay.setStyleSheet('background-color: rgb(255, 255, 0)')  # Yellow
 
-        # Run connection in separate thread to prevent GUI freeze
-        connection_thread = threading.Thread(
-            target=self._connectSerialWorker,
-            args=(serialPort, baudrate),
-            daemon=True
-        )
-        connection_thread.start()
+        # Use ConnectionManager to connect (runs in background thread)
+        self.connection_manager.connect(serialPort, baudrate, gui_instance=self)
 
     def disconnectSerial(self):
         """Disconnect from serial port"""
         try:
-            # Stop serial thread
-            if self.SerialThreadClass and self.SerialThreadClass.isRunning():
-                self.SerialThreadClass.stop()
-                self.SerialThreadClass.wait(2000)
-
-            # Close serial port
-            s0.close()
+            # Use ConnectionManager to disconnect (handles thread cleanup)
+            self.connection_manager.disconnect()
 
             # Update GUI
-            self.serialDisconnected()
             self.ConnectButton.setText("Connect")
             self.ConnectButton.setEnabled(True)
-
-            logger.info("Disconnected from serial port")
 
         except Exception as e:
             logger.error(f"Error during disconnect: {e}")
 
-    def _connectSerialWorker(self, serialPort, baudrate):
-        """Worker thread for serial connection (prevents GUI freeze)"""
-        try:
-            # Stop existing thread if running
-            if self.SerialThreadClass and self.SerialThreadClass.isRunning():
-                self.SerialThreadClass.stop()
-                self.SerialThreadClass.wait(2000)
-
-            # Close existing connection
-            s0.close()
-
-            # Configure and open new connection (this can block on Windows!)
-            s0.serial.port = serialPort
-            s0.serial.baudrate = int(baudrate)
-            s0.serial.timeout = config.SERIAL_TIMEOUT
-            s0.open()
-
-            # Clear any stale data in buffers
-            s0.reset_input_buffer()
-            logger.debug("Cleared serial input buffer")
-
-            # Create and start new serial thread (pass GUI instance for event-driven endstop polling)
-            self.SerialThreadClass = SerialThreadClass(gui_instance=self)
-            self.SerialThreadClass.start()
-
-            # Emit success signal (thread-safe)
-            # Signal connection will happen in GUI thread
-            self.connection_signals.success.emit(serialPort, baudrate)
-
-        except Exception as e:
-            logger.exception("Serial connection error")
-            # Emit error signal (thread-safe)
-            self.connection_signals.error.emit(str(e))
-
     def _onConnectionSuccess(self, serialPort, baudrate):
         """Called when connection succeeds (runs in GUI thread)"""
+        # Get serial thread from ConnectionManager and store reference
+        self.SerialThreadClass = self.connection_manager.get_serial_thread()
+
         # Connect serial signal in GUI thread (critical for Qt signals to work)
-        self.SerialThreadClass.serialSignal.connect(self.updateConsole)
+        if self.SerialThreadClass:
+            self.SerialThreadClass.serialSignal.connect(self.updateConsole)
 
         # Update GUI to show connected state
         self.updateCurrentState("Idle")
@@ -1341,52 +1196,51 @@ class BifrostGUI(Ui_MainWindow):
 
     def requestInitialPosition(self):
         """Request initial position and endstop status after connection (called by QTimer)"""
-        if s0.isOpen():
-            s0.write("M114\n".encode('UTF-8'), priority=True)
-            s0.write("M119\n".encode('UTF-8'), priority=True)
-            logger.debug("Requested initial position (M114) and endstop status (M119)")
+        self.connection_manager.request_position_update()
 
     def serialDisconnected(self):
-        self.RobotStateDisplay.setStyleSheet('background-color: rgb(255, 0, 0)')
-        self.RobotStateDisplay.setText("Disconnected")
-        self.ConnectButton.setText("Connect")
+        """Handle serial disconnection - delegates to UIStateManager"""
+        self.ui_state_manager.update_connection_state(UIConnectionState.DISCONNECTED)
+
+    # Callback methods for SerialResponseRouter
+    def _handleSerialDisconnect(self):
+        """Callback for serial disconnection from router"""
+        s0.close()
+        self.serialDisconnected()
+
+    def _onHomingComplete(self):
+        """Callback when homing cycle completes"""
+        self.is_homing = False
+        self.ui_state_manager.update_homing_state(False)
+
+    def _triggerCommandSync(self):
+        """Callback to trigger command sync to actual positions"""
+        if getattr(self, 'sync_commands_pending', False):
+            self.sync_commands_pending = False
+            self.syncCommandsToActual()
 
     def updateConsole(self, dataRead):
-        verboseShow=self.ConsoleShowVerbosecheckBox.isChecked()
-        okShow=self.ConsoleShowOkRespcheckBox.isChecked()
+        """
+        Route serial response to appropriate handler.
 
-        # Use parsing module to identify response types
-        isDataReadVerbose = parsing_patterns.is_m114_response(dataRead)
-        isEndstopResponse = parsing_patterns.is_m119_response(dataRead)
-        isDataOkResponse = parsing_patterns.is_ok_response(dataRead)
+        Delegates to SerialResponseRouter for response identification and routing.
+        Handles console display based on routing result.
+        """
+        verbose_show = self.ConsoleShowVerbosecheckBox.isChecked()
+        ok_show = self.ConsoleShowOkRespcheckBox.isChecked()
+        sync_pending = getattr(self, 'sync_commands_pending', False)
 
-        # Check if homing completed
-        if self.is_homing and isDataOkResponse:
-            self.is_homing = False
-            self.HomeButton.setEnabled(True)
-            self.HomeButton.setText("Home")
+        # Route response through the router
+        result = self.serial_response_router.route_response(
+            dataRead,
+            verbose_show=verbose_show,
+            ok_show=ok_show,
+            sync_pending=sync_pending
+        )
 
-        if dataRead=="SERIAL-DISCONNECTED":
-            s0.close()
-            self.serialDisconnected()
-            logger.warning("Serial Connection Lost")
-
-        else:
-            # Show responses to manual commands for 2 seconds after command
-            time_since_manual = time.time() - self.last_manual_command_time
-            if time_since_manual < 2.0:
-                self.ConsoleOutput.appendPlainText(dataRead)
-            # Handle endstop responses
-            elif isEndstopResponse:
-                self.updateEndstopDisplay(dataRead)
-            elif not isDataReadVerbose and not isDataOkResponse:
-                self.ConsoleOutput.appendPlainText(dataRead)
-            elif isDataOkResponse and okShow:
-                self.ConsoleOutput.appendPlainText(dataRead)
-            elif isDataReadVerbose:
-                self.updateFKPosDisplay(dataRead)
-                if verboseShow:
-                    self.ConsoleOutput.appendPlainText(dataRead)
+        # Display in console if router says so
+        if result.show_in_console:
+            self.ConsoleOutput.appendPlainText(dataRead)
 
     def sendSerialCommand(self):
         """Send manual command from console input"""
@@ -1401,8 +1255,8 @@ class BifrostGUI(Ui_MainWindow):
             # Update history and clear input
             self.ConsoleInput.addToHistory(command)
             self.ConsoleInput.clear()
-            # Mark time of manual command to show responses for next 2 seconds
-            self.last_manual_command_time = time.time()
+            # Notify router about manual command (for console display timing)
+            self.serial_response_router.mark_manual_command_sent()
             logger.debug(f"Manual command sent: {command}")
 
     def validatePosition(self, axis, value):
@@ -1422,223 +1276,268 @@ class BifrostGUI(Ui_MainWindow):
         # Delegate to RobotController
         return self.robot_controller.validate_position(axis, value)
 
-    def _parseM114Response(self, dataRead):
-        """
-        Extract position dictionary from M114 response
+    # Callback methods for PositionDisplayController
+    def _onPositionUpdate(self, positions):
+        """Callback to update GUI position labels"""
+        self.FKCurrentPosValueArt1.setText(f"{positions['X']:.2f}º")
+        self.FKCurrentPosValueArt2.setText(f"{positions['Y']:.2f}º")
+        self.FKCurrentPosValueArt3.setText(f"{positions['Z']:.2f}º")
+        self.FKCurrentPosValueArt4.setText(f"{positions['U']:.2f}º")
+        self.FKCurrentPosValueArt5.setText(f"{positions['Art5']:.2f}º")
+        self.FKCurrentPosValueArt6.setText(f"{positions['Art6']:.2f}º")
 
-        Args:
-            dataRead: Raw M114 response string
+    def _onStateUpdate(self, state, color):
+        """Callback to update robot state display"""
+        self.RobotStateDisplay.setText(state)
+        self.RobotStateDisplay.setStyleSheet(f'background-color: {color}')
 
-        Returns:
-            dict: Axis positions {axis: value} or None if parse failed
-        """
-        result = parsing_patterns.parse_m114_response(dataRead)
-        return result if result else None
+    def _onEndstopUpdate(self, axis, text, style):
+        """Callback to update endstop label"""
+        # Map axis to label
+        axis_to_label = {
+            'X': self.endstopLabelArt1,
+            'Y': self.endstopLabelArt2,
+            'Z': self.endstopLabelArt3,
+            'U': self.endstopLabelArt4,
+            'V': self.endstopLabelArt5,
+            'W': self.endstopLabelArt6
+        }
+        if axis in axis_to_label:
+            label = axis_to_label[axis]
+            label.setText(text)
+            label.setStyleSheet(style)
 
-    def _validateAllPositions(self, pos_dict):
-        """
-        Validate all axis positions and return sanitized values
-        NOW USES: RobotController for validation
+    # Callback methods for SequenceController
+    def _onSequencePointAdded(self, point_text):
+        """Callback when a point is added to the sequence"""
+        self.sequencePointsList.addItem(point_text)
 
-        Args:
-            pos_dict: Dictionary of raw positions from M114
+    def _onSequenceCleared(self):
+        """Callback when sequence is cleared"""
+        self.sequencePointsList.clear()
 
-        Returns:
-            dict: Validated positions for all axes
-        """
-        AXES = ['X', 'Y', 'Z', 'U', 'V', 'W']
-        positions = {}
+    def _onSequencePointRemoved(self, index):
+        """Callback when a point is removed from sequence"""
+        self.sequencePointsList.takeItem(index)
 
-        for axis in AXES:
-            valid, value = self.robot_controller.validate_position(axis, pos_dict.get(axis, 0.0))
-            positions[axis] = value
+    def _onSequenceButtonStateChanged(self, button_name, enabled):
+        """Callback to update sequence button states"""
+        button_map = {
+            'play': self.sequencePlayButton,
+            'pause': self.sequencePauseButton,
+            'stop': self.sequenceStopButton
+        }
+        if button_name in button_map:
+            button_map[button_name].setEnabled(enabled)
 
-            if not valid:
-                logger.warning(f"Position validation corrected for {axis}")
+    def _onSequencePauseTextChanged(self, text):
+        """Callback to update pause button text"""
+        self.sequencePauseButton.setText(text)
 
-        return positions
+    # Callback methods for IKController
+    def _onIKOutputUpdate(self, x_text, y_text, z_text):
+        """Callback to update IK output labels"""
+        self.IkOutputValueX.setText(x_text)
+        self.IkOutputValueY.setText(y_text)
+        self.IkOutputValueZ.setText(z_text)
 
-    def _updateInternalState(self, positions):
-        """
-        Update internal tracking variables from validated positions
-        NOW USES: RobotController to update state and calculate Art5/Art6
+    def _onIKSpinboxUpdate(self, joint_values):
+        """Callback to update FK spinboxes from IK solution"""
+        self.SpinBoxArt1.setValue(joint_values['Art1'])
+        self.SpinBoxArt2.setValue(joint_values['Art2'])
+        self.SpinBoxArt3.setValue(joint_values['Art3'])
+        self.SpinBoxArt4.setValue(joint_values['Art4'])
+        self.SpinBoxArt5.setValue(joint_values['Art5'])
+        self.SpinBoxArt6.setValue(joint_values['Art6'])
 
-        Args:
-            positions: Dictionary of validated axis positions
+    def _onIKStyleUpdate(self, style):
+        """Callback to update IK output frame style"""
+        self.IkOutputValueFrame.setStyleSheet(style)
 
-        Returns:
-            dict: Updated positions with calculated Art5/Art6
-        """
-        # Use RobotController to update all state
-        updated_positions = self.robot_controller.update_positions_from_firmware(positions)
+    # Callback methods for FKController
+    def _onFKSpinboxUpdate(self, joint_name, value):
+        """Callback to update a spinbox from FK controller"""
+        if joint_name in self.joint_spinboxes:
+            self.joint_spinboxes[joint_name].setValue(value)
 
-        # Keep local references for backward compatibility with existing code
-        self.current_motor_v = self.robot_controller.current_motor_v
-        self.current_motor_w = self.robot_controller.current_motor_w
-        self.desired_art5 = self.robot_controller.desired_art5
-        self.desired_art6 = self.robot_controller.desired_art6
-        self.position_update_count = self.robot_controller.position_update_count
+    def _onFKSliderUpdate(self, joint_name, slider_value):
+        """Callback to update a slider from FK controller"""
+        slider = getattr(self, f'FKSlider{joint_name}', None)
+        if slider:
+            slider.setValue(slider_value)
 
-        return updated_positions
+    def _onFKVisualizationUpdate(self, joint_angles):
+        """Callback to update 3D visualization from FK controller"""
+        if hasattr(self, 'position_canvas') and self.position_canvas:
+            self.position_canvas.update_robot(joint_angles)
 
-    def _recordPositionHistory(self, positions):
-        """
-        Record position to history (sampled based on config)
+    # Callback methods for GripperController
+    def _onGripperSpinboxUpdate(self, value):
+        """Callback to update gripper spinbox from controller"""
+        self.SpinBoxGripper.setValue(value)
 
-        Args:
-            positions: Dictionary with all position data
-        """
-        if self.position_update_count % config.POSITION_HISTORY_SAMPLE_RATE == 0:
-            self.position_history.add_snapshot(
-                art1=positions['X'],
-                art2=positions['Y'],
-                art3=positions['Z'],
-                art4=positions['U'],
-                art5=positions['Art5'],
-                art6=positions['Art6']
-            )
+    def _onGripperSliderUpdate(self, value):
+        """Callback to update gripper slider from controller"""
+        self.SliderGripper.setValue(value)
 
-    def _logPositions(self, positions):
-        """
-        Log position update details (for debugging)
+    # Callback methods for UIStateManager
+    def _setWidgetEnabled(self, widget_name, enabled):
+        """Callback to set widget enabled state"""
+        widget = getattr(self, widget_name, None)
+        if widget:
+            widget.setEnabled(enabled)
 
-        Args:
-            positions: Dictionary with all position data
-        """
-        logger.debug(
-            f"Position feedback - X:{positions['X']:.2f} Y:{positions['Y']:.2f} "
-            f"Z:{positions['Z']:.2f} U:{positions['U']:.2f} V:{positions['V']:.2f} "
-            f"W:{positions['W']:.2f}"
+    def _setWidgetStyle(self, widget_name, style):
+        """Callback to set widget stylesheet"""
+        widget = getattr(self, widget_name, None)
+        if widget:
+            widget.setStyleSheet(style)
+
+    def _setWidgetVisible(self, widget_name, visible):
+        """Callback to set widget visibility"""
+        widget = getattr(self, widget_name, None)
+        if widget and hasattr(widget, 'setVisible'):
+            widget.setVisible(visible)
+
+    def _setWidgetText(self, widget_name, text):
+        """Callback to set widget text"""
+        widget = getattr(self, widget_name, None)
+        if widget and hasattr(widget, 'setText'):
+            widget.setText(text)
+
+    # Callback methods for VisualizationController
+    def _updateVisualizationCanvas(self, history, window_size, options):
+        """Callback to update 3D visualization canvas"""
+        if hasattr(self, 'position_canvas') and self.position_canvas:
+            try:
+                self.position_canvas.update_visualization(history, window_size, options)
+            except RuntimeError as e:
+                logger.debug(f"OpenGL context error (safe to ignore): {e}")
+            except Exception as e:
+                logger.error(f"Error updating 3D canvas: {e}")
+
+    def _resetVisualizationView(self):
+        """Callback to reset 3D view to default"""
+        if hasattr(self, 'position_canvas') and self.position_canvas:
+            self.position_canvas.reset_view()
+
+    def _getTrajectoryEnabled(self):
+        """Callback to get trajectory checkbox state"""
+        if hasattr(self, 'show_trajectory_check'):
+            return self.show_trajectory_check.isChecked()
+        return False
+
+    def _getAutoRotateEnabled(self):
+        """Callback to get auto-rotate checkbox state"""
+        if hasattr(self, 'auto_rotate_check'):
+            return self.auto_rotate_check.isChecked()
+        return False
+
+    def _getTimeWindow(self):
+        """Callback to get time window value"""
+        if hasattr(self, 'timeWindowSpinBox'):
+            return self.timeWindowSpinBox.value()
+        return 60
+
+    def _getDisplayCheckboxes(self):
+        """Callback to get all display checkbox states"""
+        if hasattr(self, 'displayCheckboxes'):
+            return {key: cb.isChecked() for key, cb in self.displayCheckboxes.items()}
+        return {}
+
+    def _reloadDHParameters(self):
+        """Callback to reload DH parameters from file"""
+        import forward_kinematics as fk
+        fk.reload_dh_parameters()
+
+    # Callback methods for PositionHistoryManager
+    def _getSaveFilename(self, default_name):
+        """Callback to get save filename via file dialog"""
+        filename, _ = QtWidgets.QFileDialog.getSaveFileName(
+            None,
+            "Export Position History",
+            default_name,
+            "CSV Files (*.csv);;All Files (*)"
         )
-        logger.info(
-            f"  Art1<-X:{positions['X']:.2f}° | Art2<-Y:{positions['Y']:.2f}° | "
-            f"Art3<-Z:{positions['Z']:.2f}° | Art4<-U:{positions['U']:.2f}° | "
-            f"Art5(calc):{positions['Art5']:.2f}° | Art6(calc):{positions['Art6']:.2f}°"
-        )
+        return filename if filename else None
 
-    def _updateGUIPositions(self, positions):
-        """
-        Update GUI labels with position data (throttled)
+    def _showWarningDialog(self, message, title):
+        """Callback to show warning dialog"""
+        msgBox = QtWidgets.QMessageBox()
+        msgBox.setIcon(QtWidgets.QMessageBox.Warning)
+        msgBox.setWindowTitle(title)
+        msgBox.setText(message)
+        msgBox.exec_()
 
-        Args:
-            positions: Dictionary with all position data
-        """
-        # Log positions (throttled)
-        if self.position_update_count % config.LOGGING_INTERVAL_POSITIONS == 0:
-            self._logPositions(positions)
+    def _showInfoDialog(self, message, title):
+        """Callback to show info dialog"""
+        msgBox = QtWidgets.QMessageBox()
+        msgBox.setIcon(QtWidgets.QMessageBox.Information)
+        msgBox.setWindowTitle(title)
+        msgBox.setText(message)
+        msgBox.exec_()
 
-        # GUI updates (throttled by time)
-        current_time = time.time()
-        if current_time - self.last_gui_update_time >= config.GUI_UPDATE_INTERVAL:
-            self.last_gui_update_time = current_time
+    def _showErrorDialog(self, message, title):
+        """Callback to show error dialog"""
+        msgBox = QtWidgets.QMessageBox()
+        msgBox.setIcon(QtWidgets.QMessageBox.Critical)
+        msgBox.setWindowTitle(title)
+        msgBox.setText(message)
+        msgBox.exec_()
 
-            # Update all display labels
-            self.FKCurrentPosValueArt1.setText(f"{positions['X']:.2f}º")
-            self.FKCurrentPosValueArt2.setText(f"{positions['Y']:.2f}º")
-            self.FKCurrentPosValueArt3.setText(f"{positions['Z']:.2f}º")
-            self.FKCurrentPosValueArt4.setText(f"{positions['U']:.2f}º")
-            self.FKCurrentPosValueArt5.setText(f"{positions['Art5']:.2f}º")
-            self.FKCurrentPosValueArt6.setText(f"{positions['Art6']:.2f}º")
-
-            # Set status to Idle since M114 doesn't provide status
-            self.updateCurrentState("Idle")
+    def _confirmAction(self, message, title):
+        """Callback to confirm action with Yes/No dialog"""
+        msgBox = QtWidgets.QMessageBox()
+        msgBox.setIcon(QtWidgets.QMessageBox.Question)
+        msgBox.setWindowTitle(title)
+        msgBox.setText(message)
+        msgBox.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+        msgBox.setDefaultButton(QtWidgets.QMessageBox.No)
+        return msgBox.exec_() == QtWidgets.QMessageBox.Yes
 
     def updateFKPosDisplay(self, dataRead):
         """
-        Parse M114 position response and update all displays
+        Parse M114 position response and update all displays.
 
-        This method orchestrates position processing through several steps:
-        1. Parse raw M114 response
-        2. Validate all positions
-        3. Update internal state and differential kinematics
-        4. Record to position history
-        5. Update GUI displays (throttled)
+        Delegates to PositionDisplayController for processing.
+        Maintains backward compatibility references for existing code.
 
         Args:
             dataRead: Raw M114 response string from firmware
         """
-        try:
-            # Step 1: Parse M114 response
-            pos_dict = self._parseM114Response(dataRead)
-            if not pos_dict:
-                return
+        # Delegate to controller
+        positions = self.position_display_controller.process_m114_response(dataRead)
 
-            # Step 2: Validate we have differential axes (V and W required)
-            if 'V' not in pos_dict or 'W' not in pos_dict:
-                logger.warning("M114 response missing V or W axis - skipping update")
-                return
-
-            # Step 3: Validate all positions
-            positions = self._validateAllPositions(pos_dict)
-
-            # Step 4: Update internal state and calculate differential kinematics
-            positions = self._updateInternalState(positions)
-
-            # Step 5: Record to position history (sampled)
-            self._recordPositionHistory(positions)
-
-            # Step 6: Update GUI displays (throttled)
-            self._updateGUIPositions(positions)
-
-        except (ValueError, KeyError, IndexError) as e:
-            logger.error(f"Error parsing M114 response: {e}")
-            logger.debug(f"Problematic data: {dataRead}")
-            logger.exception("Position parsing error")
+        # Update backward compatibility references from controller
+        if positions:
+            self.current_motor_v = self.position_display_controller.current_motor_v
+            self.current_motor_w = self.position_display_controller.current_motor_w
+            self.desired_art5 = self.position_display_controller.desired_art5
+            self.desired_art6 = self.position_display_controller.desired_art6
+            self.position_update_count = self.position_display_controller.position_update_count
 
     def updateEndstopDisplay(self, dataRead):
-        """Parse M119 endstop response and update GUI displays"""
-        # Format: "Endstops - X: at min stop, Y: not stopped, Z: not stopped, U: not stopped, V: at min stop, W: at min stop, Z probe: at min stop"
-        try:
-            # Use parsing module to extract endstop statuses
-            endstops = parsing_patterns.parse_m119_response(dataRead)
-            if not endstops:
-                return
+        """
+        Parse M119 endstop response and update GUI displays.
 
-            # Update GUI labels with color coding (compact format for inline display)
-            # Green = not triggered, Red = triggered
-            # Mapping: X->Art1, Y->Art2, Z->Art3, U->Art4, V->Art5, W->Art6
-            def updateLabel(label, axis_name):
-                if axis_name in endstops:
-                    status = endstops[axis_name]
-                    # Compact status text with axis label
-                    if "not stopped" in status:
-                        label.setText(f"{axis_name}: OK")
-                        label.setStyleSheet("background-color: rgb(200, 255, 200); padding: 2px; border-radius: 3px;")  # Light green
-                    elif "min" in status:
-                        label.setText(f"{axis_name}: MIN")
-                        label.setStyleSheet("background-color: rgb(255, 200, 200); padding: 2px; border-radius: 3px;")  # Light red
-                    elif "max" in status:
-                        label.setText(f"{axis_name}: MAX")
-                        label.setStyleSheet("background-color: rgb(255, 200, 200); padding: 2px; border-radius: 3px;")  # Light red
-                    else:
-                        label.setText(f"{axis_name}: {status[:6]}")
-                        label.setStyleSheet("background-color: rgb(255, 255, 200); padding: 2px; border-radius: 3px;")  # Yellow
+        Delegates to PositionDisplayController for processing.
 
-            updateLabel(self.endstopLabelArt1, "X")
-            updateLabel(self.endstopLabelArt2, "Y")
-            updateLabel(self.endstopLabelArt3, "Z")
-            updateLabel(self.endstopLabelArt4, "U")
-            updateLabel(self.endstopLabelArt5, "V")
-            updateLabel(self.endstopLabelArt6, "W")
-
-        except Exception as e:
-            logger.error(f"Error parsing M119 endstop response: {e}")
-            logger.debug(f"Problematic data: {dataRead}")
+        Args:
+            dataRead: Raw M119 response string from firmware
+        """
+        self.position_display_controller.process_m119_response(dataRead)
 
     def updateCurrentState(self, state):
-        """Update robot state display with appropriate color coding"""
-        # State color mapping for visual feedback
-        STATE_COLORS = {
-            'Idle': 'rgb(0, 255, 0)',      # Green - ready
-            'Run': 'rgb(0, 255, 0)',       # Green - running
-            'Home': 'rgb(85, 255, 255)',   # Cyan - homing
-            'Alarm': 'rgb(255, 255, 0)',   # Yellow - warning
-            'Hold': 'rgb(255, 0, 0)',      # Red - stopped
-        }
+        """
+        Update robot state display with appropriate color coding.
 
-        self.RobotStateDisplay.setText(state)
-        color = STATE_COLORS.get(state, 'rgb(255, 255, 255)')  # Default: white
-        self.RobotStateDisplay.setStyleSheet(f'background-color: {color}')
+        Delegates to PositionDisplayController.
+
+        Args:
+            state: State string (Idle, Run, Home, Alarm, Hold)
+        """
+        self.position_display_controller.update_state(state)
+
 
 
     def _showWarningMessage(self, message, title="Warning"):
@@ -1671,134 +1570,25 @@ class BifrostGUI(Ui_MainWindow):
         )
 
 ############### SERIAL READ THREAD CLASS ###############
+# SerialThreadClass uses the global s0 SerialManager instance
+# The actual implementation is in serial_thread.py (SerialThread class)
 
-class SerialThreadClass(QtCore.QThread):
-    serialSignal = pyqtSignal(str)
+class SerialThreadClass(SerialThread):
+    """
+    Backward-compatible wrapper around SerialThread.
+    Uses the global s0 SerialManager instance.
+    """
 
     def __init__(self, gui_instance=None, parent=None):
-        super(SerialThreadClass, self).__init__(parent)
-        self.gui_instance = gui_instance  # Reference to GUI for movement tracking
-        self.running = True
-        self.elapsedTime = time.time()
-        self.endstopCheckTime = time.time()
-        self.status_polling_paused = False  # Flag to pause polling during long commands
-        self.blocking_command_start_time = 0.0  # When blocking command was sent
+        """
+        Initialize serial thread with global serial manager.
 
-    def stop(self):
-        """Gracefully stop the thread"""
-        self.running = False
-
-    def run(self):
-        """Main thread loop with non-blocking reads and command queue processing"""
-        while self.running:
-            if not s0.isOpen():
-                time.sleep(0.1)
-                continue
-
-            try:
-                # Check if connection is still alive
-                try:
-                    bytes_available = s0.inWaiting()
-                except (OSError, serial.SerialException):
-                    self.serialSignal.emit("SERIAL-DISCONNECTED")
-                    logger.warning("Lost Serial connection!")
-                    break
-
-                current_time = time.time()
-
-                # PROCESS COMMAND QUEUE (non-blocking)
-                # This is where all writes actually happen, keeping GUI thread free
-                command = s0.get_next_command()
-                if command:
-                    success = s0._write_internal(command)
-                    if not success:
-                        self.serialSignal.emit("SERIAL-DISCONNECTED")
-                        break
-
-                    # Check if this is a long-running blocking command
-                    command_str = command.decode('UTF-8', errors='replace').strip().upper()
-                    # RRF blocking commands: G28 (home), G29 (bed probe), M999 (reset)
-                    blocking_commands = ['G28', 'G29', 'M999']
-
-                    # Pause status polling if we sent a blocking command
-                    for block_cmd in blocking_commands:
-                        if command_str.startswith(block_cmd):
-                            self.status_polling_paused = True
-                            self.blocking_command_start_time = current_time
-                            logger.info(f"Pausing status polling for blocking command: {command_str}")
-                            break
-
-                # Check for timeout on paused polling (safety mechanism)
-                if self.status_polling_paused:
-                    time_paused = current_time - self.blocking_command_start_time
-                    if time_paused >= config.BLOCKING_COMMAND_MAX_PAUSE:
-                        self.status_polling_paused = False
-                        logger.warning(f"Forcing resume of status polling after {time_paused:.1f}s timeout (max: {config.BLOCKING_COMMAND_MAX_PAUSE}s)")
-                        # Request immediate position update
-                        s0.write("M114\n".encode('UTF-8'), priority=True)
-                        s0.write("M119\n".encode('UTF-8'), priority=True)
-
-                # Send status request (interval from config) - ONLY if not paused
-                if not self.status_polling_paused and current_time - self.elapsedTime > config.SERIAL_STATUS_REQUEST_INTERVAL:
-                    self.elapsedTime = current_time
-                    try:
-                        s0.write("M114\n".encode('UTF-8'), priority=True)
-                    except Exception as e:
-                        logger.error(f"Error queuing status request: {e}")
-
-                # Poll endstop status regularly - ONLY if not paused
-                if not self.status_polling_paused and current_time - self.endstopCheckTime > config.SERIAL_ENDSTOP_REQUEST_INTERVAL:
-                    self.endstopCheckTime = current_time
-                    try:
-                        s0.write("M119\n".encode('UTF-8'), priority=True)
-                    except Exception as e:
-                        logger.error(f"Error queuing endstop request: {e}")
-
-                # NON-BLOCKING BATCH READ: Process multiple lines if available
-                # This reduces loop overhead when buffer has multiple responses
-                try:
-                    if bytes_available > 0:
-                        # OPTIMIZATION: Read multiple lines when buffer is full (batch processing)
-                        # Estimate lines available (assuming ~30 bytes per line average)
-                        estimated_lines = max(1, min(10, bytes_available // 30))
-
-                        for _ in range(estimated_lines):
-                            # Check if data still available (non-blocking)
-                            if s0.inWaiting() == 0:
-                                break
-
-                            dataBytes = s0.readline()
-                            if dataBytes:
-                                # Decode bytes to string and strip whitespace
-                                dataCropped = dataBytes.decode('UTF-8', errors='replace').strip()
-                                if dataCropped:
-                                    self.serialSignal.emit(dataCropped)
-
-                                    # Resume status polling when blocking command completes
-                                    # Must meet BOTH conditions: received "ok" AND minimum time elapsed
-                                    if self.status_polling_paused and "ok" in dataCropped.lower():
-                                        time_elapsed = current_time - self.blocking_command_start_time
-                                        if time_elapsed >= config.BLOCKING_COMMAND_MIN_PAUSE:
-                                            self.status_polling_paused = False
-                                            logger.info(f"Resuming status polling after blocking command completed ({time_elapsed:.1f}s elapsed)")
-                                            # Request immediate position update after resuming
-                                            s0.write("M114\n".encode('UTF-8'), priority=True)
-                                            s0.write("M119\n".encode('UTF-8'), priority=True)
-                                        else:
-                                            logger.debug(f"Received 'ok' but only {time_elapsed:.1f}s elapsed (need {config.BLOCKING_COMMAND_MIN_PAUSE}s), waiting...")
-                except (OSError, serial.SerialException) as e:
-                    logger.error(f"Error reading from serial: {e}")
-                    self.serialSignal.emit("SERIAL-DISCONNECTED")
-                    break
-
-                # Small sleep to prevent busy-waiting (from config)
-                time.sleep(config.SERIAL_THREAD_SLEEP)
-
-            except Exception as e:
-                logger.exception("Unexpected error in serial thread")
-                time.sleep(0.1)
-
-        logger.info("Serial thread stopped")
+        Args:
+            gui_instance: Reference to GUI (kept for backward compatibility)
+            parent: Optional Qt parent object
+        """
+        super().__init__(serial_manager=s0, parent=parent)
+        self.gui_instance = gui_instance  # Kept for backward compatibility
 
 
 ###############  SERIAL READ THREAD CLASS ###############

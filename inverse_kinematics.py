@@ -9,13 +9,76 @@ import numpy.typing as npt
 import logging
 from scipy.spatial.transform import Rotation as R
 
+from forward_kinematics import get_link_lengths
+
 logger = logging.getLogger(__name__)
 
-# Thor Robot Link Lengths (in mm)
-L1 = 202.00  # Base height
-L2 = 160.00  # Upper arm length
-L3 = 195.00  # Forearm length
-L4 = 67.15   # Wrist to TCP length
+
+def _get_lengths():
+    """
+    Get link lengths from FK module (single source of truth).
+
+    Returns:
+        Tuple (L1, L2, L3, L4) in mm
+    """
+    lengths = get_link_lengths()
+    return lengths['L1'], lengths['L2'], lengths['L3'], lengths['L4']
+
+
+def _solve_first_3_joints(Pm_x: float, Pm_y: float, Pm_z: float) -> Tuple[float, float, float, float, bool, str]:
+    """
+    Solve for first 3 joints (q1, q2, q3) given wrist center position.
+
+    This extracts the common positioning logic used by both solve_ik_position and solve_ik_full.
+
+    Args:
+        Pm_x, Pm_y, Pm_z: Wrist center position in mm
+
+    Returns:
+        Tuple (q1, q2, q3, q3_rad, valid, error_msg)
+        - q1, q2, q3: Joint angles in degrees
+        - q3_rad: q3 in radians (needed for orientation calculations in 6-DOF)
+        - valid: True if solution found
+        - error_msg: Error description if invalid
+    """
+    L1, L2, L3, _ = _get_lengths()
+
+    # Calculate q1 (base rotation)
+    q1_rad = np.arctan2(Pm_y, Pm_x)
+    q1 = np.degrees(q1_rad)
+
+    # Calculate horizontal reach and vertical offset from base
+    r = np.sqrt(Pm_x**2 + Pm_y**2)  # Horizontal distance from base
+    s = Pm_z - L1  # Vertical offset from shoulder
+
+    # Distance from shoulder to wrist
+    D = np.sqrt(r**2 + s**2)
+
+    # Reachability check
+    max_reach = L2 + L3
+    min_reach = abs(L2 - L3)
+
+    if D > max_reach:
+        return 0, 0, 0, 0, False, f"Distance {D:.2f}mm exceeds max reach {max_reach:.2f}mm"
+
+    if D < min_reach:
+        return 0, 0, 0, 0, False, f"Distance {D:.2f}mm below min reach {min_reach:.2f}mm"
+
+    # Calculate q3 (elbow angle) using law of cosines
+    cos_q3 = (D**2 - L2**2 - L3**2) / (2 * L2 * L3)
+    cos_q3 = np.clip(cos_q3, -1.0, 1.0)  # Numerical stability
+
+    # Using elbow-up solution
+    sin_q3 = np.sqrt(1 - cos_q3**2)
+    q3_rad = np.arctan2(sin_q3, cos_q3)
+    q3 = np.degrees(q3_rad)
+
+    # Calculate q2 (shoulder angle)
+    alpha = np.arctan2(s, r)  # Angle from horizontal to target
+    beta = np.arctan2(L3 * np.sin(q3_rad), L2 + L3 * np.cos(q3_rad))  # Elbow correction
+    q2 = np.degrees(alpha - beta) + 90  # DH convention adjustment
+
+    return q1, q2, q3, q3_rad, True, ""
 
 
 def rotation_matrix_x(angle_rad: float) -> npt.NDArray[np.float64]:
@@ -109,81 +172,23 @@ def solve_ik_position(x: float, y: float, z: float) -> IKSolution:
         - Wrist orientation (q4, q5, q6) would be calculated separately in full 6-DOF IK
         - Currently assumes wrist pointing down (default orientation)
     """
+    _, _, _, L4 = _get_lengths()
 
     logger.info(f"IK: Solving for target position X={x:.2f}, Y={y:.2f}, Z={z:.2f}")
 
-    # Step 1: Calculate wrist center point (Pm) by moving back from TCP along default orientation
-    # Assuming default orientation with tool pointing down (-Z direction)
-    # For now, we'll position Pm directly at the target minus L4 in Z
-    # In full 6-DOF IK, this would use the desired orientation matrix
-
+    # Calculate wrist center point (Pm) - assuming tool points down
     Pm_x = x
     Pm_y = y
-    Pm_z = z + L4  # Move up by L4 to get wrist center (assuming tool points down)
+    Pm_z = z + L4  # Move up by L4 to get wrist center
 
     logger.debug(f"IK: Wrist center (Pm) calculated at X={Pm_x:.2f}, Y={Pm_y:.2f}, Z={Pm_z:.2f}")
 
-    # Step 2: Calculate q1 (base rotation)
-    # q1 = arctan(Pm_y / Pm_x)
-    q1_rad = np.arctan2(Pm_y, Pm_x)
-    q1 = np.degrees(q1_rad)
+    # Solve for first 3 joints using shared helper
+    q1, q2, q3, _, valid, error_msg = _solve_first_3_joints(Pm_x, Pm_y, Pm_z)
 
-    logger.debug(f"IK: q1 (base rotation) = {q1:.2f}°")
-
-    # Step 3: Calculate horizontal reach and vertical offset from base
-    r = np.sqrt(Pm_x**2 + Pm_y**2)  # Horizontal distance from base
-    s = Pm_z - L1  # Vertical offset from shoulder (accounting for base height)
-
-    logger.debug(f"IK: Horizontal reach r={r:.2f}, Vertical offset s={s:.2f}")
-
-    # Step 4: Calculate distance from shoulder to wrist
-    D = np.sqrt(r**2 + s**2)
-
-    logger.debug(f"IK: Distance shoulder to wrist D={D:.2f}")
-
-    # Step 5: Check if target is reachable
-    max_reach = L2 + L3
-    min_reach = abs(L2 - L3)
-
-    if D > max_reach:
-        error_msg = f"Target unreachable: distance {D:.2f}mm exceeds maximum reach {max_reach:.2f}mm"
+    if not valid:
         logger.error(f"IK: {error_msg}")
         return IKSolution(0, 0, 0, valid=False, error_msg=error_msg)
-
-    if D < min_reach:
-        error_msg = f"Target unreachable: distance {D:.2f}mm is less than minimum reach {min_reach:.2f}mm"
-        logger.error(f"IK: {error_msg}")
-        return IKSolution(0, 0, 0, valid=False, error_msg=error_msg)
-
-    # Step 6: Calculate q3 (elbow angle) using law of cosines
-    # cos(q3) = (D² - L2² - L3²) / (2*L2*L3)
-    cos_q3 = (D**2 - L2**2 - L3**2) / (2 * L2 * L3)
-
-    # Clamp to valid range to handle numerical errors
-    cos_q3 = np.clip(cos_q3, -1.0, 1.0)
-
-    # Two solutions: elbow up (+) or elbow down (-)
-    # Using positive solution (elbow up) for now
-    sin_q3 = np.sqrt(1 - cos_q3**2)
-    q3_rad = np.arctan2(sin_q3, cos_q3)
-    q3 = np.degrees(q3_rad)
-
-    logger.debug(f"IK: q3 (elbow angle) = {q3:.2f}° (cos_q3={cos_q3:.4f})")
-
-    # Step 7: Calculate q2 (shoulder angle)
-    # q2 has two components: angle to target point + correction for elbow bend
-    alpha = np.arctan2(s, r)  # Angle from horizontal to target
-    beta = np.arctan2(L3 * np.sin(q3_rad), L2 + L3 * np.cos(q3_rad))  # Correction for elbow
-
-    q2_rad = alpha - beta
-    q2 = np.degrees(q2_rad)
-
-    # Adjust q2 to match DH convention (q2-90 in DH table)
-    # The DH table shows q2-90, meaning 0° in joint space = -90° in DH
-    # We need to add 90° to get the joint angle
-    q2 = q2 + 90
-
-    logger.debug(f"IK: q2 (shoulder angle) = {q2:.2f}° (alpha={np.degrees(alpha):.2f}°, beta={np.degrees(beta):.2f}°)")
 
     logger.info(f"IK: Solution found - q1={q1:.2f}°, q2={q2:.2f}°, q3={q3:.2f}°")
 
@@ -205,6 +210,7 @@ def solve_ik_full(x: float, y: float, z: float, roll: float = 0, pitch: float = 
         - Default orientation (roll=0, pitch=-π/2, yaw=0) points tool downward
         - Uses kinematic decoupling: position (q1-q3) then orientation (q4-q6)
     """
+    L1, L2, L3, L4 = _get_lengths()
 
     logger.info(f"IK 6-DOF: Solving for TCP position X={x:.2f}, Y={y:.2f}, Z={z:.2f}")
     logger.info(f"IK 6-DOF: Target orientation Roll={np.degrees(roll):.2f}°, Pitch={np.degrees(pitch):.2f}°, Yaw={np.degrees(yaw):.2f}°")
@@ -221,45 +227,18 @@ def solve_ik_full(x: float, y: float, z: float, roll: float = 0, pitch: float = 
     Pm_x, Pm_y, Pm_z = Pm
     logger.debug(f"IK 6-DOF: Wrist center (Pm) at X={Pm_x:.2f}, Y={Pm_y:.2f}, Z={Pm_z:.2f}")
 
-    # Step 3: Solve for first 3 joints (positioning)
-    q1_rad = np.arctan2(Pm_y, Pm_x)
-    q1 = np.degrees(q1_rad)
+    # Step 3: Solve for first 3 joints using shared helper
+    q1, q2, q3, q3_rad, valid, error_msg = _solve_first_3_joints(Pm_x, Pm_y, Pm_z)
 
-    r = np.sqrt(Pm_x**2 + Pm_y**2)
-    s = Pm_z - L1
-    D = np.sqrt(r**2 + s**2)
-
-    # Reachability check
-    max_reach = L2 + L3
-    min_reach = abs(L2 - L3)
-
-    if D > max_reach:
-        error_msg = f"Target unreachable: distance {D:.2f}mm exceeds maximum reach {max_reach:.2f}mm"
+    if not valid:
         logger.error(f"IK 6-DOF: {error_msg}")
         return IKSolution(0, 0, 0, 0, 0, 0, valid=False, error_msg=error_msg)
-
-    if D < min_reach:
-        error_msg = f"Target unreachable: distance {D:.2f}mm is less than minimum reach {min_reach:.2f}mm"
-        logger.error(f"IK 6-DOF: {error_msg}")
-        return IKSolution(0, 0, 0, 0, 0, 0, valid=False, error_msg=error_msg)
-
-    # Calculate q3
-    cos_q3 = (D**2 - L2**2 - L3**2) / (2 * L2 * L3)
-    cos_q3 = np.clip(cos_q3, -1.0, 1.0)
-    sin_q3 = np.sqrt(1 - cos_q3**2)
-    q3_rad = np.arctan2(sin_q3, cos_q3)
-    q3 = np.degrees(q3_rad)
-
-    # Calculate q2
-    alpha = np.arctan2(s, r)
-    beta = np.arctan2(L3 * np.sin(q3_rad), L2 + L3 * np.cos(q3_rad))
-    q2_rad = alpha - beta
-    q2 = np.degrees(q2_rad) + 90  # DH convention adjustment
 
     logger.debug(f"IK 6-DOF: Position joints - q1={q1:.2f}°, q2={q2:.2f}°, q3={q3:.2f}°")
 
     # Step 4: Calculate rotation matrix from base to wrist (R_0^3)
     # Using DH parameters: Link 1-3
+    q1_rad = np.radians(q1)
     q2_rad_dh = np.radians(q2 - 90)  # Convert back to DH convention
 
     T1 = dh_transform(q1_rad, L1, 0, np.pi/2)
@@ -339,6 +318,8 @@ def verify_ik_solution(solution: IKSolution, target_x: float, target_y: float, t
 if __name__ == "__main__":
     # Test cases
     logging.basicConfig(level=logging.DEBUG)
+
+    L1, L2, L3, L4 = _get_lengths()
 
     print("Thor Robot Inverse Kinematics Test\n")
     print(f"Robot parameters: L1={L1}mm, L2={L2}mm, L3={L3}mm, L4={L4}mm")

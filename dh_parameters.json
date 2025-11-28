@@ -1,0 +1,61 @@
+{
+    "version": "1.1",
+    "description": "Thor Robot DH Parameters with calibration",
+    "date_modified": "2025-11-27",
+    "links": [
+        {
+            "link": 1,
+            "theta_offset": 0.0,
+            "direction": 1,
+            "d": 202.0,
+            "a": 0.0,
+            "alpha": 90.0,
+            "description": "Base rotation"
+        },
+        {
+            "link": 2,
+            "theta_offset": 90.0,
+            "direction": 1,
+            "d": 0.0,
+            "a": 160.0,
+            "alpha": 0.0,
+            "description": "Shoulder"
+        },
+        {
+            "link": 3,
+            "theta_offset": 90.0,
+            "direction": 1,
+            "d": 0.0,
+            "a": 0.0,
+            "alpha": 90.0,
+            "description": "Elbow"
+        },
+        {
+            "link": 4,
+            "theta_offset": 0.0,
+            "direction": 1,
+            "d": 195.0,
+            "a": 0.0,
+            "alpha": -90.0,
+            "description": "Wrist roll"
+        },
+        {
+            "link": 5,
+            "theta_offset": 0.0,
+            "direction": 1,
+            "d": 0.0,
+            "a": 0.0,
+            "alpha": 90.0,
+            "description": "Wrist pitch"
+        },
+        {
+            "link": 6,
+            "theta_offset": 0.0,
+            "direction": 1,
+            "d": 67.15,
+            "a": 0.0,
+            "alpha": 0.0,
+            "description": "Wrist yaw / TCP"
+        }
+    ]
+}
