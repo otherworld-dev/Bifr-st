@@ -347,6 +347,27 @@ def compute_tcp_transform(q1: float, q2: float, q3: float, q4: float, q5: float,
     return A1 @ A2 @ A3 @ A4 @ A5 @ A6
 
 
+def compute_tool_transform(
+    q1: float, q2: float, q3: float, q4: float, q5: float, q6: float,
+    tool_offset: np.ndarray = None
+) -> np.ndarray:
+    """
+    Compute tool tip transformation (TCP + tool offset).
+
+    Args:
+        q1, q2, q3, q4, q5, q6: Joint angles in degrees
+        tool_offset: Optional 4x4 tool offset matrix relative to TCP
+
+    Returns:
+        4x4 transformation matrix of tool tip in base frame
+    """
+    tcp_transform = compute_tcp_transform(q1, q2, q3, q4, q5, q6)
+
+    if tool_offset is not None:
+        return tcp_transform @ tool_offset
+    return tcp_transform
+
+
 def compute_workspace_envelope() -> dict:
     """
     Compute workspace envelope parameters for visualization

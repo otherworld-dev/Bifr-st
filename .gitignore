@@ -25,3 +25,14 @@ ENV/
 # OS
 .DS_Store
 Thumbs.db
+
+# Temporary/Test files
+test_*.py
+test_*.json
+*_test.py
+*_backup.py
+*_old.py
+
+# Development artifacts
+_ul*
+nul

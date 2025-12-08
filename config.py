@@ -3,6 +3,9 @@ Bifrost Configuration
 All constants and configurable parameters in one place
 """
 
+# ========== GUI Selection ==========
+USE_MODERN_GUI = True  # Set to True for modern mode-based UI, False for classic UI
+
 # ========== Serial Communication ==========
 SERIAL_TIMEOUT = 0.1  # seconds - SHORT timeout to prevent blocking on busy firmware
 SERIAL_BAUDRATE_DEFAULT = 115200
@@ -20,17 +23,18 @@ BLOCKING_COMMAND_MAX_PAUSE = 30.0  # Maximum pause - force resume even without "
 # ========== Position Feedback & Validation ==========
 # Position limits for each axis (degrees)
 POSITION_LIMITS = {
-    'X': (-180, 180),   # Art1 base rotation
+    'X': (-720, 720),   # Art1 base rotation (continuous, allow ±2 full rotations)
     'Y': (-180, 180),   # Art2 shoulder (coupled motors)
     'Z': (-180, 180),   # Art3 elbow
-    'U': (-180, 180),   # Art4 wrist roll
-    'V': (-360, 360),   # Differential motor V
-    'W': (-360, 360),   # Differential motor W
+    'U': (-720, 720),   # Art4 wrist roll (continuous, allow ±2 full rotations)
+    'V': (-720, 720),   # Differential motor V (increased for multi-turn capability)
+    'W': (-720, 720),   # Differential motor W (increased for multi-turn capability)
 }
 
 # Maximum position change per 100ms update (degrees)
 # Used to detect encoder errors or impossible movements
-MAX_POSITION_CHANGE_PER_UPDATE = 50  # degrees
+# Increased to allow for commanded movements (G0 can move quickly)
+MAX_POSITION_CHANGE_PER_UPDATE = 180  # degrees
 
 # GUI update throttling - OPTIMIZED for performance
 GUI_UPDATE_INTERVAL = 0.1  # seconds (10Hz max) - faster visual feedback
@@ -75,6 +79,12 @@ INCREMENT_SMALL = 0.1    # degrees
 GRIPPER_PWM_MAX = 255
 GRIPPER_PERCENT_MAX = 100
 
+# Gripper PWM calibration - adjust these to limit servo travel
+# PWM value when gripper is fully open (100%)
+GRIPPER_PWM_OPEN = 255
+# PWM value when gripper is fully closed (0%) - reduce this to prevent servo stalling
+GRIPPER_PWM_CLOSED = 0
+
 # ========== Position History ==========
 POSITION_HISTORY_MAX_SIZE = 5000  # Maximum snapshots to keep in memory
 POSITION_HISTORY_SAMPLE_RATE = 10  # Record every Nth position update (1=all, 10=every 10th) - optimized for memory
@@ -102,3 +112,9 @@ GRAPH_UPDATE_INTERVAL_MS = 2000  # milliseconds between 3D visualization updates
 # ========== Jog Mode ==========
 JOG_MODE_WARNING_ENABLED = True  # Show confirmation dialog when enabling jog mode
 JOG_MODE_VISUAL_HIGHLIGHT = "rgb(255, 200, 100)"  # Orange background for jog mode indicator
+
+# ========== Coordinate Frames ==========
+FRAMES_CONFIG_FILE = "coordinate_frames.json"  # File for persisting frame definitions
+DEFAULT_TOOL_OFFSET_Z = 67.15  # Default TCP offset (from DH parameter L4)
+FRAME_AXIS_LENGTH = 50  # mm - length of frame axes in 3D visualization
+FRAME_AXIS_LENGTH_TOOL = 35  # mm - shorter axes for tool frames

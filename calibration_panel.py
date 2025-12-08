@@ -3,6 +3,7 @@ Robot Calibration Panel
 Interactive UI for calibrating joint angles to match physical robot with DH parameters
 
 This panel edits DH parameters directly (theta_offset and direction fields).
+Also includes gripper PWM calibration.
 """
 
 from PyQt5 import QtCore, QtGui, QtWidgets
@@ -10,11 +11,32 @@ from pathlib import Path
 import json
 import logging
 from forward_kinematics import get_dh_params, reload_dh_parameters
+import config
 
 logger = logging.getLogger(__name__)
 
 # DH parameters file path
 DH_PARAMS_FILE = Path(__file__).parent / 'dh_parameters.json'
+GRIPPER_CALIBRATION_FILE = Path(__file__).parent / 'gripper_calibration.json'
+
+
+def load_gripper_calibration_on_startup():
+    """
+    Load gripper calibration from file and apply to config module.
+    Call this at application startup to ensure settings are loaded
+    before the calibration panel is opened.
+    """
+    try:
+        if GRIPPER_CALIBRATION_FILE.exists():
+            with open(GRIPPER_CALIBRATION_FILE, 'r') as f:
+                data = json.load(f)
+            config.GRIPPER_PWM_OPEN = data.get('pwm_open', 255)
+            config.GRIPPER_PWM_CLOSED = data.get('pwm_closed', 0)
+            logger.info(f"Loaded gripper calibration: open={config.GRIPPER_PWM_OPEN}, closed={config.GRIPPER_PWM_CLOSED}")
+        else:
+            logger.debug("No gripper calibration file found, using defaults")
+    except Exception as e:
+        logger.error(f"Error loading gripper calibration on startup: {e}")
 
 
 class JointCalibrationWidget(QtWidgets.QWidget):
@@ -208,6 +230,176 @@ class JointCalibrationWidget(QtWidgets.QWidget):
         }
 
 
+class GripperCalibrationWidget(QtWidgets.QWidget):
+    """Widget for calibrating gripper PWM range"""
+
+    # Signal emitted when gripper test command should be sent
+    test_gripper = QtCore.pyqtSignal(int)  # PWM value to test
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setup_ui()
+        self.load_calibration()
+
+    def setup_ui(self):
+        """Create UI elements for gripper calibration"""
+        main_layout = QtWidgets.QVBoxLayout(self)
+
+        # Header
+        header_layout = QtWidgets.QHBoxLayout()
+        header_label = QtWidgets.QLabel("<b>Gripper PWM Calibration</b>")
+        header_label.setStyleSheet("font-size: 14px;")
+        header_layout.addWidget(header_label)
+        header_layout.addStretch()
+        main_layout.addLayout(header_layout)
+
+        # Description
+        desc_label = QtWidgets.QLabel(
+            "Adjust PWM range to prevent servo stalling. "
+            "Reduce 'Closed PWM' if gripper locks up when gripping objects."
+        )
+        desc_label.setWordWrap(True)
+        desc_label.setStyleSheet("color: gray; font-size: 10px; margin-bottom: 5px;")
+        main_layout.addWidget(desc_label)
+
+        # Frame for controls
+        frame = QtWidgets.QFrame()
+        frame.setFrameShape(QtWidgets.QFrame.StyledPanel)
+        frame_layout = QtWidgets.QGridLayout(frame)
+
+        # Row 0: Open PWM (100% position)
+        frame_layout.addWidget(QtWidgets.QLabel("Open PWM (100%):"), 0, 0)
+        self.open_pwm_spinbox = QtWidgets.QSpinBox()
+        self.open_pwm_spinbox.setRange(0, 255)
+        self.open_pwm_spinbox.setValue(255)
+        self.open_pwm_spinbox.setToolTip("PWM value when gripper is fully open")
+        frame_layout.addWidget(self.open_pwm_spinbox, 0, 1)
+
+        self.test_open_btn = QtWidgets.QPushButton("Test Open")
+        self.test_open_btn.setStyleSheet("background-color: #ccffcc;")
+        self.test_open_btn.clicked.connect(lambda: self.test_gripper.emit(self.open_pwm_spinbox.value()))
+        frame_layout.addWidget(self.test_open_btn, 0, 2)
+
+        # Row 1: Closed PWM (0% position)
+        frame_layout.addWidget(QtWidgets.QLabel("Closed PWM (0%):"), 1, 0)
+        self.closed_pwm_spinbox = QtWidgets.QSpinBox()
+        self.closed_pwm_spinbox.setRange(0, 255)
+        self.closed_pwm_spinbox.setValue(0)
+        self.closed_pwm_spinbox.setToolTip("PWM value when gripper is fully closed - reduce to prevent stalling")
+        frame_layout.addWidget(self.closed_pwm_spinbox, 1, 1)
+
+        self.test_closed_btn = QtWidgets.QPushButton("Test Closed")
+        self.test_closed_btn.setStyleSheet("background-color: #ffcccc;")
+        self.test_closed_btn.clicked.connect(lambda: self.test_gripper.emit(self.closed_pwm_spinbox.value()))
+        frame_layout.addWidget(self.test_closed_btn, 1, 2)
+
+        # Row 2: Direct PWM test slider
+        frame_layout.addWidget(QtWidgets.QLabel("Test PWM:"), 2, 0)
+        self.test_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.test_slider.setRange(0, 255)
+        self.test_slider.setValue(128)
+        frame_layout.addWidget(self.test_slider, 2, 1)
+
+        self.test_value_label = QtWidgets.QLabel("128")
+        self.test_value_label.setMinimumWidth(30)
+        frame_layout.addWidget(self.test_value_label, 2, 2)
+
+        # Connect slider to label update
+        self.test_slider.valueChanged.connect(lambda v: self.test_value_label.setText(str(v)))
+
+        # Row 3: Send test button
+        self.send_test_btn = QtWidgets.QPushButton("Send Test PWM")
+        self.send_test_btn.setStyleSheet("background-color: #ffffcc;")
+        self.send_test_btn.clicked.connect(lambda: self.test_gripper.emit(self.test_slider.value()))
+        frame_layout.addWidget(self.send_test_btn, 3, 1, 1, 2)
+
+        # Row 4: Current effective range display
+        frame_layout.addWidget(QtWidgets.QLabel("Effective Range:"), 4, 0)
+        self.range_label = QtWidgets.QLabel("0 - 255 PWM")
+        self.range_label.setStyleSheet("font-weight: bold; color: #0066cc;")
+        frame_layout.addWidget(self.range_label, 4, 1, 1, 2)
+
+        main_layout.addWidget(frame)
+
+        # Update range label when values change
+        self.open_pwm_spinbox.valueChanged.connect(self.update_range_label)
+        self.closed_pwm_spinbox.valueChanged.connect(self.update_range_label)
+
+        # Save button
+        save_layout = QtWidgets.QHBoxLayout()
+        save_layout.addStretch()
+        self.save_btn = QtWidgets.QPushButton("💾 Save Gripper Settings")
+        self.save_btn.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold; padding: 8px;")
+        self.save_btn.clicked.connect(self.save_calibration)
+        save_layout.addWidget(self.save_btn)
+        main_layout.addLayout(save_layout)
+
+    def update_range_label(self):
+        """Update the effective range display"""
+        closed = self.closed_pwm_spinbox.value()
+        open_val = self.open_pwm_spinbox.value()
+        self.range_label.setText(f"{closed} - {open_val} PWM")
+
+    def load_calibration(self):
+        """Load gripper calibration from file or config defaults"""
+        try:
+            if GRIPPER_CALIBRATION_FILE.exists():
+                with open(GRIPPER_CALIBRATION_FILE, 'r') as f:
+                    data = json.load(f)
+                self.open_pwm_spinbox.setValue(data.get('pwm_open', 255))
+                self.closed_pwm_spinbox.setValue(data.get('pwm_closed', 0))
+                logger.info("Loaded gripper calibration from file")
+            else:
+                # Use config defaults
+                self.open_pwm_spinbox.setValue(config.GRIPPER_PWM_OPEN)
+                self.closed_pwm_spinbox.setValue(config.GRIPPER_PWM_CLOSED)
+                logger.info("Using default gripper calibration from config")
+
+            self.update_range_label()
+            self.apply_to_config()
+
+        except Exception as e:
+            logger.error(f"Error loading gripper calibration: {e}")
+
+    def save_calibration(self):
+        """Save gripper calibration to file and apply to config"""
+        try:
+            data = {
+                'pwm_open': self.open_pwm_spinbox.value(),
+                'pwm_closed': self.closed_pwm_spinbox.value()
+            }
+
+            with open(GRIPPER_CALIBRATION_FILE, 'w') as f:
+                json.dump(data, f, indent=4)
+
+            self.apply_to_config()
+
+            logger.info(f"Saved gripper calibration: {data}")
+
+            QtWidgets.QMessageBox.information(
+                self,
+                "Gripper Settings Saved",
+                f"Gripper PWM range saved!\n\n"
+                f"Open (100%): {data['pwm_open']} PWM\n"
+                f"Closed (0%): {data['pwm_closed']} PWM\n\n"
+                f"Changes are now active."
+            )
+
+        except Exception as e:
+            logger.error(f"Error saving gripper calibration: {e}")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Save Error",
+                f"Failed to save gripper settings:\n{e}"
+            )
+
+    def apply_to_config(self):
+        """Apply current values to the config module at runtime"""
+        config.GRIPPER_PWM_OPEN = self.open_pwm_spinbox.value()
+        config.GRIPPER_PWM_CLOSED = self.closed_pwm_spinbox.value()
+        logger.debug(f"Applied gripper PWM: open={config.GRIPPER_PWM_OPEN}, closed={config.GRIPPER_PWM_CLOSED}")
+
+
 class CalibrationPanel(QtWidgets.QWidget):
     """Main calibration panel with all joints"""
 
@@ -268,6 +460,17 @@ class CalibrationPanel(QtWidgets.QWidget):
             widget.test_movement.connect(self.on_test_movement)
             self.joint_widgets[joint_name] = widget
             scroll_layout.addWidget(widget)
+
+        # Add separator
+        separator = QtWidgets.QFrame()
+        separator.setFrameShape(QtWidgets.QFrame.HLine)
+        separator.setStyleSheet("background-color: #ccc; margin: 10px 0;")
+        scroll_layout.addWidget(separator)
+
+        # Add gripper calibration widget
+        self.gripper_calibration = GripperCalibrationWidget()
+        self.gripper_calibration.test_gripper.connect(self.on_test_gripper)
+        scroll_layout.addWidget(self.gripper_calibration)
 
         scroll_layout.addStretch()
         scroll.setWidget(scroll_content)
@@ -331,6 +534,32 @@ class CalibrationPanel(QtWidgets.QWidget):
 
             self.status_label.setText(f"Status: Moved {joint_name} {delta_angle:+.1f}° → {new_value:.1f}°")
             self.status_label.setStyleSheet("background-color: #ccffcc; padding: 5px;")
+
+    def on_test_gripper(self, pwm_value):
+        """Handle gripper test button clicks - send direct PWM command"""
+        logger.info(f"Test gripper PWM: {pwm_value}")
+
+        if not self.gui_instance:
+            self.status_label.setText("Status: No GUI instance - cannot send command")
+            self.status_label.setStyleSheet("background-color: #ffcccc; padding: 5px;")
+            return
+
+        # Convert PWM to servo angle (0-255 PWM -> 0-180 servo angle)
+        servo_angle = int((pwm_value / 255.0) * 180.0)
+        command = f"M280 P0 S{servo_angle}"
+
+        # Send via serial if connected
+        if hasattr(self.gui_instance, 'serial_manager') and self.gui_instance.serial_manager:
+            if self.gui_instance.serial_manager.is_connected():
+                self.gui_instance.serial_manager.send_command(command)
+                self.status_label.setText(f"Status: Sent gripper test PWM={pwm_value} (angle={servo_angle}°)")
+                self.status_label.setStyleSheet("background-color: #ccffcc; padding: 5px;")
+            else:
+                self.status_label.setText("Status: Not connected - cannot send gripper command")
+                self.status_label.setStyleSheet("background-color: #ffcccc; padding: 5px;")
+        else:
+            self.status_label.setText("Status: Serial manager not available")
+            self.status_label.setStyleSheet("background-color: #ffcccc; padding: 5px;")
 
     def load_current_calibration(self):
         """Load calibration from DH parameters file"""

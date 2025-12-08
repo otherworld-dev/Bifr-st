@@ -16,6 +16,7 @@ matplotlib>=3.8.0
 # Optional: For enhanced plotting
 # pandas>=2.0.0  # Uncomment for CSV analysis in external scripts
 
-# Development Dependencies (optional)
-# pytest>=7.0.0  # Uncomment for running tests
-# pytest-qt>=4.0.0  # Uncomment for PyQt5 testing
+# Development Dependencies
+pytest>=7.0.0
+pytest-cov>=4.0.0  # For coverage reports
+# pytest-qt>=4.0.0  # Uncomment for PyQt5 GUI testing

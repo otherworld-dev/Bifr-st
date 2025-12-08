@@ -7,9 +7,10 @@ import config
 
 # Import appropriate GUI based on config
 if config.USE_MODERN_GUI:
-    from gui_modern import Ui_MainWindow
+    from gui_modern import Ui_MainWindow, PointEditDialog
 else:
     from gui import Ui_MainWindow
+    PointEditDialog = None  # Not available in legacy GUI
 
 from about import Ui_Dialog as About_Ui_Dialog
 
@@ -35,6 +36,7 @@ from ui_state_manager import UIStateManager, ConnectionState as UIConnectionStat
 from serial_response_router import SerialResponseRouter
 from visualization_controller import VisualizationController
 from position_history_manager import PositionHistoryManager
+from calibration_panel import load_gripper_calibration_on_startup
 
 import serial
 import time
@@ -52,6 +54,9 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+# Load gripper calibration from file (if exists) before GUI starts
+load_gripper_calibration_on_startup()
 
 # This application is designed for RepRapFirmware (RRF) only
 # All parsing patterns are now in parsing_patterns.py module
@@ -254,6 +259,12 @@ class BifrostGUI(Ui_MainWindow):
         # Connect console input signals after replacing with HistoryLineEdit
         self.ConsoleButtonSend.pressed.connect(self.sendSerialCommand)
         self.ConsoleInput.returnPressed.connect(self.sendSerialCommand)
+        self.ConsoleClearButton.pressed.connect(self.clearConsole)
+
+        # Quick command buttons on terminal tab
+        self.QuickM114Button.pressed.connect(lambda: self.sendQuickCommand("M114"))
+        self.QuickM119Button.pressed.connect(lambda: self.sendQuickCommand("M119"))
+        self.QuickG28Button.pressed.connect(lambda: self.sendQuickCommand("G28"))
 
         # IK Control connections with debounce
         # Use timer to batch rapid spinbox changes for smoother GUI
@@ -417,6 +428,12 @@ class BifrostGUI(Ui_MainWindow):
 
         # Set command sender for sequence controller
         self.sequence_controller.command_sender = self.command_sender
+
+        # Connect teach panel signals for manual point entry (modern GUI only)
+        if config.USE_MODERN_GUI and hasattr(self, 'teach_panel'):
+            self.teach_panel.manualPointRequested.connect(self.openAddManualPointDialog)
+            self.teach_panel.pointEditRequested.connect(self.openEditPointDialog)
+            self.teach_panel.importCsvRequested.connect(self.importCsvSequence)
 
         # Set command sender for FK controller
         self.fk_controller.command_sender = self.command_sender
@@ -1104,6 +1121,56 @@ class BifrostGUI(Ui_MainWindow):
                 msgBox.setWindowTitle("Load Failed")
                 msgBox.exec_()
 
+    def openAddManualPointDialog(self):
+        """Open dialog to manually add a sequence point."""
+        if PointEditDialog is None:
+            logger.warning("Manual point dialog not available in legacy GUI")
+            return
+
+        dialog = PointEditDialog(None)
+        if dialog.exec_() == QtWidgets.QDialog.Accepted:
+            point_data = dialog.get_point_data()
+            self.sequence_controller.add_manual_point(point_data)
+            logger.info(f"Added manual point: {point_data}")
+
+    def openEditPointDialog(self, index):
+        """Open dialog to edit an existing sequence point."""
+        if PointEditDialog is None:
+            logger.warning("Edit point dialog not available in legacy GUI")
+            return
+
+        point_data = self.sequence_controller.get_point_data(index)
+        if point_data is None:
+            logger.warning(f"No point found at index {index}")
+            return
+
+        dialog = PointEditDialog(None, point_data=point_data, point_index=index)
+        if dialog.exec_() == QtWidgets.QDialog.Accepted:
+            new_data = dialog.get_point_data()
+            self.sequence_controller.update_point(index, new_data)
+            logger.info(f"Updated point {index + 1}: {new_data}")
+
+    def importCsvSequence(self):
+        """Import sequence points from a CSV file."""
+        filename, _ = QtWidgets.QFileDialog.getOpenFileName(
+            None,
+            "Import CSV Sequence",
+            "",
+            "CSV Files (*.csv);;All Files (*)"
+        )
+
+        if filename:
+            success, message = self.sequence_controller.import_csv(filename)
+            msgBox = QtWidgets.QMessageBox()
+            if success:
+                msgBox.setIcon(QtWidgets.QMessageBox.Information)
+                msgBox.setWindowTitle("Import Successful")
+            else:
+                msgBox.setIcon(QtWidgets.QMessageBox.Critical)
+                msgBox.setWindowTitle("Import Failed")
+            msgBox.setText(message)
+            msgBox.exec_()
+
 # Serial Connection functions
     def getSerialPorts(self):
         """Refresh available serial ports in combo box"""
@@ -1258,6 +1325,16 @@ class BifrostGUI(Ui_MainWindow):
             # Notify router about manual command (for console display timing)
             self.serial_response_router.mark_manual_command_sent()
             logger.debug(f"Manual command sent: {command}")
+
+    def clearConsole(self):
+        """Clear the console output"""
+        self.ConsoleOutput.clear()
+
+    def sendQuickCommand(self, command):
+        """Send a quick command from terminal tab buttons"""
+        if self.command_sender.send_if_connected(command, error_callback=self.noSerialConnection):
+            self.serial_response_router.mark_manual_command_sent()
+            logger.debug(f"Quick command sent: {command}")
 
     def validatePosition(self, axis, value):
         """

@@ -16,23 +16,23 @@ M586 P1 S0                                                               ; disab
 M586 P2 S0                                                               ; disable Telnet
 
 ; Drives
-M569 P0 S1 T1.0:1.0:0.2:0.2                                              ; physical drive 0 goes forwards using A4988 driver timings
-M569 P1 S1 T1.0:1.0:0.2:0.2                                              ; physical drive 1 goes forwards using A4988 driver timings
-M569 P2 S1 T1.0:1.0:0.2:0.2                                              ; physical drive 2 goes forwards using A4988 driver timings
-M569 P3 S1 T1.0:1.0:0.2:0.2                                              ; physical drive 3 goes forwards using A4988 driver timings
+M569 P0 S0 T1.0:1.0:0.2:0.2                                              ; physical drive 0 goes forwards using A4988 driver timings
+M569 P1 S0 T1.0:1.0:0.2:0.2                                              ; physical drive 1 goes forwards using A4988 driver timings
+M569 P2 S0 T1.0:1.0:0.2:0.2                                    			 ; physical drive 2 goes forwards using A4988 driver timings
+M569 P3 S0 T1.0:1.0:0.2:0.2                                              ; physical drive 3 goes forwards using A4988 driver timings
 M569 P4 S1 T1.0:1.0:0.2:0.2                                              ; physical drive 4 goes forwards using A4988 driver timings
 M569 P5 S1 T1.0:1.0:0.2:0.2                                              ; physical drive 5 goes forwards using A4988 driver timings
 M569 P6 S1 T1.0:1.0:0.2:0.2                                              ; physical drive 6 goes forwards using A4988 driver timings
 M584 X0 Y1:2 Z3 U4 V5 W6                                                 ; set drive mapping
 M350 X16 Y16 Z16 U16 V16 W16 I1                                          ; configure microstepping with interpolation
-M92 X44.50 Y270.00 Z265.00 U17.55 V18.40 W18.40                          ; set steps per mm
+M92 X44.50 Y44.50 Z265.00 U17.55 V18.40 W18.40                           ; set steps per mm
 M566 X900.00 Y900.00 Z900.00 U900.00 V9000.00 W9000.00                   ; set maximum instantaneous speed changes (mm/min)
 M203 X2000.00 Y800.00 Z800.00 U2000.00 V5000.00 W5000.00                 ; set maximum speeds (mm/min)
 M201 X10.00 Y10.00 Z10.00 U10.00 V100.00 W100.00                         ; set accelerations (mm/s^2)
-M906 X800 Y800 Z800 U800 V800 W800       I30                             ; set motor currents (mA) and motor idle factor in per cent ; TODO: Check if this has to be changed/removed
+;M906 X800 Y800 Z800 U800 V800 W800       I30                             ; set motor currents (mA) and motor idle factor in per cent ; TODO: Check if this has to be changed/removed
 M84 S30                                                                  ; Set idle timeout
 
-; Servomotor
+; Servomotor	
 M950 S0 C"pwm_out1"                                                      ; physical pin pwm_out1 configured for move the tool servo
 
 ; Axis Limits
@@ -58,22 +58,26 @@ M140 H-1                                                                 ; disab
 ; Robot Fans
 M950 F0 C"fan0" Q500                                                     ; create fan 0 on pin fan0 and set its frequency
 M106 P0 S1 H-1                                                           ; set fan 0 value. Thermostatic control is turned off
-M950 F2 C"fan2" Q500                                                     ; create fan 3 on pin fan2 and set its frequency
-M106 P2 S1 H-1                                                           ; set fan 2 value. Thermostatic control is turned off
-M950 F4 C"fan4" Q500                                                     ; create fan 4 on pin fan4 and set its frequency
-M106 P4 S1 H-1                                                           ; set fan 4 value. Thermostatic control is turned off
-M950 F6 C"fan6" Q500                                                     ; create fan 6 on pin fan6 and set its frequency
-M106 P6 S1 H-1                                                           ; set fan 6 value. Thermostatic control is turned off
-
-; Electronic Fans
-M950 F1 C"fan1" Q500                                                     ; create fan 1 on pin fan0 and set its frequency
+M950 F1 C"fan1" Q500                                                     ; create fan 1 on pin fan1 and set its frequency
 M106 P1 S1 H-1                                                           ; set fan 1 value. Thermostatic control is turned off
+M950 F2 C"fan2" Q500                                                     ; create fan 2 on pin fan2 and set its frequency
+M106 P2 S1 H-1                                                           ; set fan 2 value. Thermostatic control is turned off
 M950 F3 C"fan3" Q500                                                     ; create fan 3 on pin fan3 and set its frequency
 M106 P3 S1 H-1                                                           ; set fan 3 value. Thermostatic control is turned off
+M950 F4 C"fan4" Q500                                                     ; create fan 4 on pin fan4 and set its frequency
+M106 P4 S1 H-1                                                           ; set fan 4 value. Thermostatic control is turned off
 M950 F5 C"fan5" Q500                                                     ; create fan 5 on pin fan5 and set its frequency
 M106 P5 S1 H-1                                                           ; set fan 5 value. Thermostatic control is turned off
+
+; Electronic Fans
+M950 F6 C"fan6" Q500                                                     ; create fan 6 on pin fan6 and set its frequency
+M106 P6 S1 H-1                                                           ; set fan 6 value. Thermostatic control is turned off
 M950 F7 C"fan7" Q500                                                     ; create fan 7 on pin fan7 and set its frequency
 M106 P7 S1 H-1                                                           ; set fan 7 value. Thermostatic control is turned off
+M950 F8 C"fan8" Q500                                                     ; create fan 8 on pin fan8 and set its frequency
+M106 P8 S1 H-1                                                           ; set fan 8 value. Thermostatic control is turned off
+M950 F9 C"fan9" Q500                                                     ; create fan 9 on pin fan9 and set its frequency
+M106 P9 S1 H-1                                                           ; set fan 9 value. Thermostatic control is turned off
 
 ; Tools
 M563 P0 D0 F0                                                            ; define tool 0
