@@ -1,0 +1,44 @@
+{
+    "_comment": "STL calibration offsets for Thor robot visualization",
+    "_usage": {
+        "offset": "[x, y, z] translation in mm applied in STL local frame before FK transform",
+        "rotation": "[rx, ry, rz] Euler angles in degrees (XYZ order) applied before FK transform",
+        "scale": "Scale factor (1.0 = no scaling). Use if STL is in different units"
+    },
+    "_note": "All STLs were exported with centers around [128, 128, z]. Offsets re-center them to joint axes.",
+    "base": {
+        "offset": [-36, -126, 0],
+        "rotation": [0, 0, 180],
+        "scale": 1.0
+    },
+    "art1": {
+        "offset": [-130,-125, -150],
+        "rotation": [-90, 180, 0],
+        "scale": 1.0
+    },
+    "art2": {
+        "offset": [-130, -200, -70],
+        "rotation": [0, 0, -90],
+        "scale": 1.0
+    },
+    "art3": {
+        "offset": [-128, -128, -100],
+        "rotation": [0, 180, 0],
+        "scale": 1.0
+    },
+    "art4": {
+        "offset": [-128, -128, -170],
+        "rotation": [90, 90, 0],
+        "scale": 1.0
+    },
+    "art5": {
+        "offset": [-128, -115, -50],
+        "rotation": [90, 0, 90],
+        "scale": 1.0
+    },
+    "gripper": {
+        "offset": [-125, -100, -20],
+        "rotation": [0, 0, -90],
+        "scale": 1.0
+    }
+}

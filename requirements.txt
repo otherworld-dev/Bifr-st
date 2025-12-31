@@ -13,6 +13,13 @@ numpy>=1.23.0
 # Visualization (Position History feature)
 matplotlib>=3.8.0
 
+# 3D Visualization with PyQtGraph
+pyqtgraph>=0.13.0
+PyOpenGL>=3.1.0
+
+# STL mesh loading for robot visualization
+numpy-stl>=3.0.0
+
 # Optional: For enhanced plotting
 # pandas>=2.0.0  # Uncomment for CSV analysis in external scripts
 

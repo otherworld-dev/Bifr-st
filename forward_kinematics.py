@@ -271,6 +271,119 @@ def compute_all_joint_positions(q1: float, q2: float, q3: float, q4: float, q5: 
     return positions
 
 
+def compute_all_joint_transforms(q1: float, q2: float, q3: float, q4: float, q5: float, q6: float) -> List[np.ndarray]:
+    """
+    Compute cumulative transformation matrices for all joints.
+    Used for STL mesh visualization where we need full pose (position + orientation).
+
+    Args:
+        q1, q2, q3, q4, q5, q6: Joint angles in degrees
+
+    Returns:
+        List of 7 4x4 transformation matrices:
+        [T_base, T_1, T_12, T_123, T_1234, T_12345, T_123456]
+        Where T_base is identity (base frame), T_1 is after joint 1, etc.
+    """
+    params = get_dh_params()
+    if params is None:
+        logger.error("DH parameters not loaded")
+        return [np.eye(4)] * 7
+
+    # Extract link parameters
+    d1 = params[0]['d']
+    a2 = params[1]['a']
+    d4 = params[3]['d']
+
+    # Extract theta offsets and direction from DH parameters
+    theta_offset1 = np.radians(params[0]['theta_offset'])
+    theta_offset2 = np.radians(params[1]['theta_offset'])
+    theta_offset3 = np.radians(params[2]['theta_offset'])
+    theta_offset4 = np.radians(params[3]['theta_offset'])
+    theta_offset5 = np.radians(params[4]['theta_offset'])
+    theta_offset6 = np.radians(params[5]['theta_offset'])
+
+    dir1 = params[0].get('direction', 1)
+    dir2 = params[1].get('direction', 1)
+    dir3 = params[2].get('direction', 1)
+    dir4 = params[3].get('direction', 1)
+    dir5 = params[4].get('direction', 1)
+    dir6 = params[5].get('direction', 1)
+
+    q1_rad = np.radians(q1 * dir1) + theta_offset1
+    q2_rad = np.radians(q2 * dir2) + theta_offset2
+    q3_rad = np.radians(q3 * dir3) + theta_offset3
+    q4_rad = np.radians(q4 * dir4) + theta_offset4
+    q5_rad = np.radians(q5 * dir5) + theta_offset5
+    q6_rad = np.radians(q6 * dir6) + theta_offset6
+
+    c1, s1 = np.cos(q1_rad), np.sin(q1_rad)
+    c2, s2 = np.cos(q2_rad), np.sin(q2_rad)
+    c3, s3 = np.cos(q3_rad), np.sin(q3_rad)
+    c4, s4 = np.cos(q4_rad), np.sin(q4_rad)
+    c5, s5 = np.cos(q5_rad), np.sin(q5_rad)
+    c6, s6 = np.cos(q6_rad), np.sin(q6_rad)
+
+    alpha1 = np.radians(params[0]['alpha'])
+    alpha4 = np.radians(params[3]['alpha'])
+
+    ca1, sa1 = np.cos(alpha1), np.sin(alpha1)
+    ca4, sa4 = np.cos(alpha4), np.sin(alpha4)
+
+    # Build transformation matrices (same as compute_all_joint_positions)
+    A1 = np.array([
+        [c1, -s1 * ca1,  s1 * sa1, 0],
+        [s1,  c1 * ca1, -c1 * sa1, 0],
+        [0,   sa1,       ca1,      d1],
+        [0,   0,         0,        1]
+    ], dtype=np.float64)
+
+    A2 = np.array([
+        [c2, -s2, 0, a2 * c2],
+        [s2,  c2, 0, a2 * s2],
+        [0,   0,  1, 0],
+        [0,   0,  0, 1]
+    ], dtype=np.float64)
+
+    A3 = np.array([
+        [c3,  0,  s3, 0],
+        [s3,  0, -c3, 0],
+        [0,   1,   0, 0],
+        [0,   0,   0, 1]
+    ], dtype=np.float64)
+
+    A4 = np.array([
+        [c4, -s4 * ca4,  s4 * sa4, 0],
+        [s4,  c4 * ca4, -c4 * sa4, 0],
+        [0,   sa4,       ca4,      d4],
+        [0,   0,         0,        1]
+    ], dtype=np.float64)
+
+    A5 = np.array([
+        [c5,  0,  s5, 0],
+        [s5,  0, -c5, 0],
+        [0,   1,   0, 0],
+        [0,   0,   0, 1]
+    ], dtype=np.float64)
+
+    a6 = params[5]['d']
+    A6 = np.array([
+        [c6, -s6, 0, a6 * c6],
+        [s6,  c6, 0, a6 * s6],
+        [0,   0,  1, 0],
+        [0,   0,  0, 1]
+    ], dtype=np.float64)
+
+    # Compute cumulative transforms
+    transforms = [np.eye(4)]  # Base transform (identity)
+
+    T = np.eye(4)
+    for A in [A1, A2, A3, A4, A5, A6]:
+        T = T @ A
+        transforms.append(T.copy())
+
+    return transforms
+
+
 def compute_tcp_position_only(q1: float, q2: float, q3: float, q4: float, q5: float, q6: float) -> Tuple[float, float, float]:
     """
     Compute only TCP position (faster than computing all joints)

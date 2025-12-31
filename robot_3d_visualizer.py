@@ -12,10 +12,227 @@ import pyqtgraph.opengl as gl
 from PyQt5 import QtCore, QtWidgets, QtGui
 import logging
 import threading
+from pathlib import Path
+import json
 
 import forward_kinematics as fk
 
 logger = logging.getLogger(__name__)
+
+# Try to import numpy-stl for STL loading
+try:
+    from stl import mesh as stl_mesh
+    STL_AVAILABLE = True
+except ImportError:
+    STL_AVAILABLE = False
+    logger.warning("numpy-stl not installed. STL visualization disabled. "
+                   "Install with: pip install numpy-stl")
+
+
+# =============================================================================
+# STL Mesh Loading for Realistic Robot Visualization
+# =============================================================================
+
+# STL file mapping: joint index -> filename
+STL_FILES = {
+    'base': 'Thor - base.stl',
+    'art1': 'Thor - Art1.stl',
+    'art2': 'Thor - Art2.stl',
+    'art3': 'Thor - Art3.stl',
+    'art4': 'Thor - Art4.stl',
+    'art5': 'Thor - Art5.stl',
+    'gripper': 'Thor - Gripper.stl',
+}
+
+# Cache for loaded STL meshes
+_stl_cache = {}
+
+
+def get_stl_directory():
+    """Get the STL files directory path"""
+    return Path(__file__).parent / 'STLs'
+
+
+def load_stl_mesh(name):
+    """
+    Load an STL file and convert to PyQtGraph mesh format.
+
+    Args:
+        name: Key from STL_FILES dict ('base', 'art1', etc.)
+
+    Returns:
+        Tuple (vertices, faces) or None if loading fails.
+        vertices: Nx3 numpy array of vertex positions
+        faces: Mx3 numpy array of face indices
+    """
+    global _stl_cache
+
+    if not STL_AVAILABLE:
+        return None
+
+    if name in _stl_cache:
+        return _stl_cache[name]
+
+    if name not in STL_FILES:
+        logger.warning(f"Unknown STL name: {name}")
+        return None
+
+    stl_path = get_stl_directory() / STL_FILES[name]
+
+    if not stl_path.exists():
+        logger.warning(f"STL file not found: {stl_path}")
+        return None
+
+    try:
+        # Load STL using numpy-stl
+        mesh_data = stl_mesh.Mesh.from_file(str(stl_path))
+
+        # Extract vertices - STL stores 3 vertices per face
+        # mesh_data.vectors has shape (n_faces, 3, 3) - 3 vertices per face, 3 coords per vertex
+        n_faces = len(mesh_data.vectors)
+
+        # Flatten to get all vertices (with duplicates)
+        all_vertices = mesh_data.vectors.reshape(-1, 3)
+
+        # Create unique vertices and face indices
+        # For efficiency with large meshes, we deduplicate vertices
+        unique_vertices, inverse_indices = np.unique(
+            all_vertices, axis=0, return_inverse=True
+        )
+
+        # Reshape inverse indices to get face indices
+        faces = inverse_indices.reshape(n_faces, 3)
+
+        # Convert to float32 for OpenGL
+        vertices = unique_vertices.astype(np.float32)
+        faces = faces.astype(np.uint32)
+
+        logger.info(f"Loaded STL '{name}': {len(vertices)} vertices, {len(faces)} faces")
+
+        # Cache the result
+        _stl_cache[name] = (vertices, faces)
+        return vertices, faces
+
+    except Exception as e:
+        logger.error(f"Error loading STL '{name}': {e}")
+        return None
+
+
+def load_all_stl_meshes():
+    """Pre-load all STL meshes into cache"""
+    if not STL_AVAILABLE:
+        logger.warning("STL loading not available")
+        return False
+
+    success = True
+    for name in STL_FILES.keys():
+        result = load_stl_mesh(name)
+        if result is None:
+            success = False
+
+    return success
+
+
+def get_stl_calibration():
+    """
+    Load STL calibration offsets from config file.
+
+    Returns:
+        Dict mapping STL name to calibration dict with:
+        - offset: [x, y, z] translation offset in mm
+        - rotation: [rx, ry, rz] rotation in degrees (applied as Euler XYZ)
+        - scale: float scale factor (default 1.0)
+    """
+    config_path = get_stl_directory() / 'stl_calibration.json'
+
+    # Default calibration (identity - no offset)
+    default_calibration = {
+        'base': {'offset': [0, 0, 0], 'rotation': [0, 0, 0], 'scale': 1.0},
+        'art1': {'offset': [0, 0, 0], 'rotation': [0, 0, 0], 'scale': 1.0},
+        'art2': {'offset': [0, 0, 0], 'rotation': [0, 0, 0], 'scale': 1.0},
+        'art3': {'offset': [0, 0, 0], 'rotation': [0, 0, 0], 'scale': 1.0},
+        'art4': {'offset': [0, 0, 0], 'rotation': [0, 0, 0], 'scale': 1.0},
+        'art5': {'offset': [0, 0, 0], 'rotation': [0, 0, 0], 'scale': 1.0},
+        'gripper': {'offset': [0, 0, 0], 'rotation': [0, 0, 0], 'scale': 1.0},
+    }
+
+    if config_path.exists():
+        try:
+            with open(config_path, 'r') as f:
+                loaded = json.load(f)
+            # Merge with defaults
+            for key in default_calibration:
+                if key in loaded:
+                    default_calibration[key].update(loaded[key])
+            logger.info("Loaded STL calibration from config")
+        except Exception as e:
+            logger.warning(f"Error loading STL calibration: {e}")
+
+    return default_calibration
+
+
+def euler_to_rotation_matrix(rx, ry, rz):
+    """
+    Create rotation matrix from Euler angles (XYZ order, degrees).
+
+    Args:
+        rx, ry, rz: Rotation angles in degrees
+
+    Returns:
+        3x3 rotation matrix
+    """
+    rx, ry, rz = np.radians([rx, ry, rz])
+
+    cx, sx = np.cos(rx), np.sin(rx)
+    cy, sy = np.cos(ry), np.sin(ry)
+    cz, sz = np.cos(rz), np.sin(rz)
+
+    # Rotation matrices
+    Rx = np.array([[1, 0, 0], [0, cx, -sx], [0, sx, cx]])
+    Ry = np.array([[cy, 0, sy], [0, 1, 0], [-sy, 0, cy]])
+    Rz = np.array([[cz, -sz, 0], [sz, cz, 0], [0, 0, 1]])
+
+    # Combined rotation (XYZ order)
+    return Rz @ Ry @ Rx
+
+
+def transform_stl_vertices(vertices, transform_4x4, calibration=None):
+    """
+    Apply transformation to STL vertices.
+
+    Args:
+        vertices: Nx3 array of vertex positions
+        transform_4x4: 4x4 homogeneous transformation matrix (from FK)
+        calibration: Optional dict with 'offset', 'rotation', 'scale'
+
+    Returns:
+        Transformed Nx3 vertex array
+    """
+    verts = vertices.copy()
+
+    # Apply calibration first (in original STL local frame)
+    if calibration:
+        # Scale first
+        scale = calibration.get('scale', 1.0)
+        verts = verts * scale
+
+        # Offset in original STL coordinates (before rotation)
+        offset = calibration.get('offset', [0, 0, 0])
+        verts = verts + np.array(offset)
+
+        # Then rotate to align with robot frame
+        rot = calibration.get('rotation', [0, 0, 0])
+        if any(r != 0 for r in rot):
+            R_local = euler_to_rotation_matrix(*rot)
+            verts = verts @ R_local.T
+
+    # Apply FK transformation
+    R = transform_4x4[:3, :3]
+    t = transform_4x4[:3, 3]
+
+    verts = verts @ R.T + t
+
+    return verts.astype(np.float32)
 
 
 # =============================================================================
@@ -295,6 +512,11 @@ class Robot3DCanvas(gl.GLViewWidget):
         self.auto_rotate = False
         self.rotation_angle = 45  # Current azimuth for auto-rotate
 
+        # STL visualization options
+        self.use_stl = STL_AVAILABLE  # Use STL meshes if available
+        self.stl_loaded = False
+        self.stl_calibration = get_stl_calibration()
+
         # Color schemes (RGBA format for PyQtGraph)
         # Thor robot colors - bright orange body with contrasting accents
         self.colors_active = {
@@ -348,6 +570,15 @@ class Robot3DCanvas(gl.GLViewWidget):
 
         # Setup initial view
         self.setup_3d_view()
+
+        # Pre-load STL meshes if available
+        if self.use_stl:
+            self.stl_loaded = load_all_stl_meshes()
+            if self.stl_loaded:
+                logger.info("STL meshes loaded successfully")
+            else:
+                logger.warning("Some STL meshes failed to load, falling back to primitives")
+                self.use_stl = False
 
         # Show home position immediately
         self.show_home_position()
@@ -472,11 +703,12 @@ class Robot3DCanvas(gl.GLViewWidget):
             self.addItem(self.grid_item)
 
         # Show robot at home position (all joints at 0)
-        home_positions = fk.compute_all_joint_positions(0, 0, 0, 0, 0, 0)
+        home_angles = (0, 0, 0, 0, 0, 0)
+        home_positions = fk.compute_all_joint_positions(*home_angles)
         self.current_joint_positions = home_positions
 
         # Draw robot in inactive colors
-        self.draw_robot_arm(home_positions, active=False)
+        self.draw_robot_arm(home_positions, active=False, joint_angles=home_angles)
 
         # Draw base coordinate frame (XYZ axes at origin)
         self.draw_base_frame(length=100)
@@ -514,11 +746,12 @@ class Robot3DCanvas(gl.GLViewWidget):
             self.addItem(self.grid_item)
 
         # Show robot at home position (all joints at 0) with new DH parameters
-        home_positions = fk.compute_all_joint_positions(0, 0, 0, 0, 0, 0)
+        home_angles = (0, 0, 0, 0, 0, 0)
+        home_positions = fk.compute_all_joint_positions(*home_angles)
         self.current_joint_positions = home_positions
 
         # Draw robot in preview colors (inactive/gray)
-        self.draw_robot_arm(home_positions, active=False)
+        self.draw_robot_arm(home_positions, active=False, joint_angles=home_angles)
 
         # Draw TCP frame at home position
         self.draw_tcp_frame(0, 0, 0, 0, 0, 0, length=50)
@@ -596,9 +829,119 @@ class Robot3DCanvas(gl.GLViewWidget):
         self.workspace_item = None
         self.grid_item = None
 
-    def draw_robot_arm(self, joint_positions, active=True):
+    def draw_robot_arm(self, joint_positions, active=True, joint_angles=None):
         """
-        Draw realistic Thor robot arm using 3D mesh primitives.
+        Draw Thor robot arm - dispatches to STL or primitive rendering.
+
+        Args:
+            joint_positions: List of 7 tuples [(x,y,z), ...] for joints
+            active: If True, use active colors; if False, use inactive (gray)
+            joint_angles: Optional tuple (q1,q2,q3,q4,q5,q6) for STL rendering
+        """
+        if joint_positions is None or len(joint_positions) < 7:
+            return
+
+        # Try STL rendering if available
+        if self.use_stl and self.stl_loaded and joint_angles is not None:
+            self._draw_robot_stl(joint_angles, active)
+            return
+
+        # Fall back to primitive rendering
+        self._draw_robot_primitives(joint_positions, active)
+
+    def _draw_robot_stl(self, joint_angles, active=True):
+        """
+        Draw Thor robot using actual STL mesh files.
+
+        Args:
+            joint_angles: Tuple (q1, q2, q3, q4, q5, q6) in degrees
+            active: If True, use active colors; if False, use inactive (gray)
+        """
+        q1, q2, q3, q4, q5, q6 = joint_angles
+
+        # Get cumulative transforms for each joint
+        transforms = fk.compute_all_joint_transforms(q1, q2, q3, q4, q5, q6)
+
+        # Clear existing mesh items
+        for item in self.robot_mesh_items:
+            if item is not None:
+                try:
+                    self.removeItem(item)
+                except Exception:
+                    pass
+        self.robot_mesh_items = []
+
+        # Select color scheme
+        colors = self.colors_active if active else self.colors_inactive
+
+        # STL to transform mapping:
+        # base    -> transforms[0] (identity - fixed at origin)
+        # art1    -> transforms[1] (after J1)
+        # art2    -> transforms[2] (after J1+J2)
+        # art3    -> transforms[3] (after J1+J2+J3)
+        # art4    -> transforms[4] (after J1+J2+J3+J4)
+        # art5    -> transforms[5] (after J1+J2+J3+J4+J5)
+        # gripper -> transforms[6] (after all joints - TCP frame)
+
+        stl_mapping = [
+            ('base', 0, colors['accent']),
+            ('art1', 1, colors['body']),
+            ('art2', 2, colors['body']),
+            ('art3', 3, colors['body_dark']),
+            ('art4', 4, colors['body']),
+            ('art5', 5, colors['body_dark']),
+            ('gripper', 6, colors['gripper']),
+        ]
+
+        for stl_name, transform_idx, color in stl_mapping:
+            mesh_data = load_stl_mesh(stl_name)
+            if mesh_data is None:
+                continue
+
+            vertices, faces = mesh_data
+            transform = transforms[transform_idx]
+            calibration = self.stl_calibration.get(stl_name)
+
+            # Transform vertices
+            transformed_verts = transform_stl_vertices(vertices, transform, calibration)
+
+            # Create mesh item
+            mesh_item = gl.GLMeshItem(
+                vertexes=transformed_verts,
+                faces=faces,
+                color=color,
+                shader='shaded',
+                smooth=True,
+                drawEdges=False
+            )
+            self.addItem(mesh_item)
+            self.robot_mesh_items.append(mesh_item)
+
+        # Add TCP indicator sphere
+        tcp_pos = transforms[6][:3, 3]
+        tcp_verts, tcp_faces = create_dome_mesh(10, segments=12, rings=6)
+        tcp_bottom = tcp_verts.copy()
+        tcp_bottom[:, 2] = -tcp_bottom[:, 2]
+        tcp_sphere_verts = np.vstack([tcp_verts, tcp_bottom])
+        n_top = len(tcp_verts)
+        tcp_sphere_faces = np.vstack([tcp_faces, tcp_faces + n_top])
+        tcp_sphere_verts = transform_mesh(tcp_sphere_verts, tcp_pos)
+
+        tcp_mesh = gl.GLMeshItem(
+            vertexes=tcp_sphere_verts,
+            faces=tcp_sphere_faces,
+            color=colors['tcp'],
+            shader='shaded',
+            smooth=True,
+            drawEdges=False
+        )
+        self.addItem(tcp_mesh)
+        self.robot_mesh_items.append(tcp_mesh)
+
+    def _draw_robot_primitives(self, joint_positions, active=True):
+        """
+        Draw Thor robot arm using geometric primitives (cylinders, boxes).
+        Fallback when STL files are not available.
 
         Joint positions from FK (7 positions):
         [0] Base (origin)
@@ -613,9 +956,6 @@ class Robot3DCanvas(gl.GLViewWidget):
             joint_positions: List of 7 tuples [(x,y,z), ...] for joints
             active: If True, use active colors; if False, use inactive (gray)
         """
-        if joint_positions is None or len(joint_positions) < 7:
-            return
-
         # Select color scheme
         colors = self.colors_active if active else self.colors_inactive
 
@@ -1398,18 +1738,19 @@ class Robot3DCanvas(gl.GLViewWidget):
 
             # Draw robot arm if enabled
             if self.show_robot:
-                self.draw_robot_arm(current_positions, active=True)
-
-                # Draw TCP coordinate frame to show end effector orientation
-                self.draw_tcp_frame(
+                # Extract joint angles as tuple for STL rendering
+                joint_angles = (
                     current_angles.get('art1', 0),
                     current_angles.get('art2', 0),
                     current_angles.get('art3', 0),
                     current_angles.get('art4', 0),
                     current_angles.get('art5', 0),
-                    current_angles.get('art6', 0),
-                    length=50  # 50mm axes for good visibility
+                    current_angles.get('art6', 0)
                 )
+                self.draw_robot_arm(current_positions, active=True, joint_angles=joint_angles)
+
+                # Draw TCP coordinate frame to show end effector orientation
+                self.draw_tcp_frame(*joint_angles, length=50)
 
             # Draw TCP trajectory if enabled
             if self.show_trajectory and len(tcp_trajectory) > 1:
