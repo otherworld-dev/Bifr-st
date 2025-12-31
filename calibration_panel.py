@@ -1,9 +1,9 @@
 """
 Robot Calibration Panel
-Interactive UI for calibrating joint angles to match physical robot with DH parameters
-
-This panel edits DH parameters directly (theta_offset and direction fields).
-Also includes gripper PWM calibration.
+Consolidates all calibration settings:
+- Motor direction verification
+- Gripper PWM calibration
+- DH parameters editing
 """
 
 from PyQt5 import QtCore, QtGui, QtWidgets
@@ -40,17 +40,14 @@ def load_gripper_calibration_on_startup():
 
 
 class JointCalibrationWidget(QtWidgets.QWidget):
-    """Widget for calibrating a single joint"""
+    """Widget for verifying direction of a single joint"""
 
-    # Signal emitted when calibration values change
-    calibration_changed = QtCore.pyqtSignal(str, float, int)  # joint_name, offset, direction
     test_movement = QtCore.pyqtSignal(str, float)  # joint_name, delta_angle
 
     def __init__(self, joint_name, joint_description, parent=None):
         super().__init__(parent)
         self.joint_name = joint_name
         self.joint_description = joint_description
-        self.current_offset = 0.0
         self.current_direction = 1
 
         self.setup_ui()
@@ -59,84 +56,42 @@ class JointCalibrationWidget(QtWidgets.QWidget):
         """Create UI elements for this joint"""
         # Main layout
         main_layout = QtWidgets.QVBoxLayout(self)
-
-        # Header
-        header_layout = QtWidgets.QHBoxLayout()
-        header_label = QtWidgets.QLabel(f"<b>{self.joint_name}</b>")
-        header_label.setStyleSheet("font-size: 14px;")
-        header_layout.addWidget(header_label)
-
-        desc_label = QtWidgets.QLabel(self.joint_description)
-        desc_label.setStyleSheet("color: gray; font-size: 10px;")
-        header_layout.addWidget(desc_label)
-        header_layout.addStretch()
-
-        main_layout.addLayout(header_layout)
+        main_layout.setContentsMargins(5, 5, 5, 5)
 
         # Frame for controls
         frame = QtWidgets.QFrame()
         frame.setFrameShape(QtWidgets.QFrame.StyledPanel)
         frame_layout = QtWidgets.QGridLayout(frame)
+        frame_layout.setContentsMargins(10, 8, 10, 8)
 
-        # Row 0: Current firmware angle display
-        frame_layout.addWidget(QtWidgets.QLabel("Firmware Angle:"), 0, 0)
-        self.firmware_angle_label = QtWidgets.QLabel("0.00°")
-        self.firmware_angle_label.setStyleSheet("font-weight: bold; color: #0066cc;")
-        frame_layout.addWidget(self.firmware_angle_label, 0, 1)
+        # Row 0: Joint name and description + Direction control
+        header_label = QtWidgets.QLabel(f"<b>{self.joint_name}</b>")
+        header_label.setStyleSheet("font-size: 13px;")
+        frame_layout.addWidget(header_label, 0, 0)
 
-        # Row 1: Direction control
-        frame_layout.addWidget(QtWidgets.QLabel("Direction:"), 1, 0)
+        desc_label = QtWidgets.QLabel(self.joint_description)
+        desc_label.setStyleSheet("color: gray; font-size: 10px;")
+        frame_layout.addWidget(desc_label, 0, 1)
+
+        # Direction control on same row
         direction_layout = QtWidgets.QHBoxLayout()
         self.direction_button_group = QtWidgets.QButtonGroup(self)
 
-        self.forward_radio = QtWidgets.QRadioButton("Forward (+1)")
+        self.forward_radio = QtWidgets.QRadioButton("Forward")
         self.forward_radio.setChecked(True)
         self.direction_button_group.addButton(self.forward_radio, 1)
         direction_layout.addWidget(self.forward_radio)
 
-        self.reverse_radio = QtWidgets.QRadioButton("Reverse (-1)")
+        self.reverse_radio = QtWidgets.QRadioButton("Reverse")
         self.direction_button_group.addButton(self.reverse_radio, -1)
         direction_layout.addWidget(self.reverse_radio)
 
-        direction_layout.addStretch()
-        frame_layout.addLayout(direction_layout, 1, 1, 1, 3)
+        frame_layout.addLayout(direction_layout, 0, 2)
 
-        # Row 2: Offset control
-        frame_layout.addWidget(QtWidgets.QLabel("Offset (°):"), 2, 0)
-        self.offset_spinbox = QtWidgets.QDoubleSpinBox()
-        self.offset_spinbox.setRange(-180, 180)
-        self.offset_spinbox.setDecimals(2)
-        self.offset_spinbox.setSingleStep(1.0)
-        self.offset_spinbox.setValue(0.0)
-        frame_layout.addWidget(self.offset_spinbox, 2, 1)
+        # Row 1: Test movement buttons
+        frame_layout.addWidget(QtWidgets.QLabel("Test:"), 1, 0)
 
-        # Quick offset buttons
-        offset_btn_layout = QtWidgets.QHBoxLayout()
-        self.offset_minus_10 = QtWidgets.QPushButton("-10")
-        self.offset_minus_10.setMaximumWidth(50)
-        self.offset_minus_1 = QtWidgets.QPushButton("-1")
-        self.offset_minus_1.setMaximumWidth(50)
-        self.offset_plus_1 = QtWidgets.QPushButton("+1")
-        self.offset_plus_1.setMaximumWidth(50)
-        self.offset_plus_10 = QtWidgets.QPushButton("+10")
-        self.offset_plus_10.setMaximumWidth(50)
-
-        offset_btn_layout.addWidget(self.offset_minus_10)
-        offset_btn_layout.addWidget(self.offset_minus_1)
-        offset_btn_layout.addWidget(self.offset_plus_1)
-        offset_btn_layout.addWidget(self.offset_plus_10)
-        frame_layout.addLayout(offset_btn_layout, 2, 2, 1, 2)
-
-        # Row 3: Calibrated angle display
-        frame_layout.addWidget(QtWidgets.QLabel("Calibrated Angle:"), 3, 0)
-        self.calibrated_angle_label = QtWidgets.QLabel("0.00°")
-        self.calibrated_angle_label.setStyleSheet("font-weight: bold; color: #00aa00;")
-        frame_layout.addWidget(self.calibrated_angle_label, 3, 1)
-
-        # Row 4: Test movement buttons
-        frame_layout.addWidget(QtWidgets.QLabel("Test Movement:"), 4, 0)
         test_btn_layout = QtWidgets.QHBoxLayout()
-
         self.test_minus_10 = QtWidgets.QPushButton("-10°")
         self.test_minus_10.setStyleSheet("background-color: #ffcccc;")
         self.test_minus_1 = QtWidgets.QPushButton("-1°")
@@ -150,23 +105,12 @@ class JointCalibrationWidget(QtWidgets.QWidget):
         test_btn_layout.addWidget(self.test_minus_1)
         test_btn_layout.addWidget(self.test_plus_1)
         test_btn_layout.addWidget(self.test_plus_10)
-        frame_layout.addLayout(test_btn_layout, 4, 1, 1, 3)
-
-        # Row 5: Status checkbox
-        self.verified_checkbox = QtWidgets.QCheckBox("✓ Verified - Matches physical robot")
-        self.verified_checkbox.setStyleSheet("color: green; font-weight: bold;")
-        frame_layout.addWidget(self.verified_checkbox, 5, 0, 1, 4)
+        frame_layout.addLayout(test_btn_layout, 1, 1, 1, 2)
 
         main_layout.addWidget(frame)
 
         # Connect signals
         self.direction_button_group.buttonToggled.connect(self.on_direction_changed)
-        self.offset_spinbox.valueChanged.connect(self.on_offset_changed)
-
-        self.offset_minus_10.clicked.connect(lambda: self.adjust_offset(-10))
-        self.offset_minus_1.clicked.connect(lambda: self.adjust_offset(-1))
-        self.offset_plus_1.clicked.connect(lambda: self.adjust_offset(1))
-        self.offset_plus_10.clicked.connect(lambda: self.adjust_offset(10))
 
         self.test_minus_10.clicked.connect(lambda: self.test_movement.emit(self.joint_name, -10))
         self.test_minus_1.clicked.connect(lambda: self.test_movement.emit(self.joint_name, -1))
@@ -175,59 +119,24 @@ class JointCalibrationWidget(QtWidgets.QWidget):
 
     def on_direction_changed(self, button, checked):
         """Called when direction radio button changes"""
-        # Only process when a button is being checked (not unchecked)
         if not checked:
             return
         direction = self.direction_button_group.checkedId()
-        # Guard against invalid direction values
         if direction not in (1, -1):
             direction = 1
         self.current_direction = direction
-        self.update_calibrated_angle()
-        self.calibration_changed.emit(self.joint_name, self.current_offset, self.current_direction)
 
-    def on_offset_changed(self, value):
-        """Called when offset spinbox changes"""
-        self.current_offset = value
-        self.update_calibrated_angle()
-        self.calibration_changed.emit(self.joint_name, self.current_offset, self.current_direction)
-
-    def adjust_offset(self, delta):
-        """Adjust offset by delta amount"""
-        new_value = self.offset_spinbox.value() + delta
-        self.offset_spinbox.setValue(new_value)
-
-    def update_firmware_angle(self, angle):
-        """Update the displayed firmware angle"""
-        self.firmware_angle_label.setText(f"{angle:.2f}°")
-        self.update_calibrated_angle()
-
-    def update_calibrated_angle(self):
-        """Recalculate and display calibrated angle"""
-        firmware_angle = float(self.firmware_angle_label.text().replace('°', ''))
-        calibrated = (firmware_angle * self.current_direction) + self.current_offset
-        self.calibrated_angle_label.setText(f"{calibrated:.2f}°")
-
-    def set_calibration(self, offset, direction):
-        """Set calibration values programmatically"""
-        self.current_offset = offset
+    def set_direction(self, direction):
+        """Set direction programmatically"""
         self.current_direction = direction
-
-        self.offset_spinbox.setValue(offset)
         if direction == 1:
             self.forward_radio.setChecked(True)
         else:
             self.reverse_radio.setChecked(True)
 
-        self.update_calibrated_angle()
-
-    def get_calibration(self):
-        """Get current calibration values"""
-        return {
-            'offset': self.current_offset,
-            'direction': self.current_direction,
-            'verified': self.verified_checkbox.isChecked()
-        }
+    def get_direction(self):
+        """Get current direction value"""
+        return self.current_direction
 
 
 class GripperCalibrationWidget(QtWidgets.QWidget):
@@ -400,8 +309,213 @@ class GripperCalibrationWidget(QtWidgets.QWidget):
         logger.debug(f"Applied gripper PWM: open={config.GRIPPER_PWM_OPEN}, closed={config.GRIPPER_PWM_CLOSED}")
 
 
+class DHParametersWidget(QtWidgets.QWidget):
+    """Widget for editing DH parameters table"""
+
+    parameters_changed = QtCore.pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.spinboxes = {}
+        self.direction_combos = {}
+        self._loading = False
+        self.setup_ui()
+        self.load_parameters()
+
+    def setup_ui(self):
+        """Create UI elements for DH parameters"""
+        main_layout = QtWidgets.QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Header
+        header_label = QtWidgets.QLabel("<b>DH Parameters</b>")
+        header_label.setStyleSheet("font-size: 14px;")
+        main_layout.addWidget(header_label)
+
+        # Create table
+        self.table = QtWidgets.QTableWidget()
+        self.table.setColumnCount(6)
+        self.table.setHorizontalHeaderLabels(["Link", "θ offset (°)", "Dir", "d (mm)", "a (mm)", "α (°)"])
+        self.table.setRowCount(6)
+
+        # Set column widths
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QtWidgets.QHeaderView.Fixed)
+        header.setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
+        header.setSectionResizeMode(2, QtWidgets.QHeaderView.Fixed)
+        header.setSectionResizeMode(3, QtWidgets.QHeaderView.Stretch)
+        header.setSectionResizeMode(4, QtWidgets.QHeaderView.Stretch)
+        header.setSectionResizeMode(5, QtWidgets.QHeaderView.Stretch)
+        self.table.setColumnWidth(0, 40)
+        self.table.setColumnWidth(2, 50)
+
+        self.table.setAlternatingRowColors(True)
+        self.table.setMinimumHeight(220)
+        self.table.verticalHeader().setDefaultSectionSize(30)
+        self.table.setStyleSheet("""
+            QTableWidget {
+                background-color: #ffffff;
+                alternate-background-color: #f9f9f9;
+                gridline-color: #ddd;
+                border: 1px solid #ccc;
+            }
+            QHeaderView::section {
+                background-color: #e8e8e8;
+                padding: 4px;
+                border: 1px solid #ccc;
+                font-weight: bold;
+            }
+        """)
+
+        # Create widgets for each cell
+        for row in range(6):
+            # Link number (read-only)
+            link_item = QtWidgets.QTableWidgetItem(str(row + 1))
+            link_item.setFlags(QtCore.Qt.ItemIsEnabled)
+            link_item.setTextAlignment(QtCore.Qt.AlignCenter)
+            self.table.setItem(row, 0, link_item)
+
+            # theta_offset spinbox
+            spinbox = QtWidgets.QDoubleSpinBox()
+            spinbox.setRange(-360, 360)
+            spinbox.setDecimals(2)
+            spinbox.setSingleStep(1.0)
+            spinbox.setAlignment(QtCore.Qt.AlignCenter)
+            self.table.setCellWidget(row, 1, spinbox)
+            self.spinboxes[(row, 'theta_offset')] = spinbox
+
+            # Direction combobox
+            direction_combo = QtWidgets.QComboBox()
+            direction_combo.addItems(["+1", "-1"])
+            self.table.setCellWidget(row, 2, direction_combo)
+            self.direction_combos[row] = direction_combo
+
+            # d, a, alpha spinboxes
+            for col, param in enumerate(['d', 'a', 'alpha'], start=3):
+                spinbox = QtWidgets.QDoubleSpinBox()
+                spinbox.setRange(-1000 if param in ['d', 'a'] else -360, 1000 if param in ['d', 'a'] else 360)
+                spinbox.setDecimals(2)
+                spinbox.setSingleStep(1.0)
+                spinbox.setAlignment(QtCore.Qt.AlignCenter)
+                self.table.setCellWidget(row, col, spinbox)
+                self.spinboxes[(row, param)] = spinbox
+
+        main_layout.addWidget(self.table)
+
+        # Buttons
+        button_layout = QtWidgets.QHBoxLayout()
+
+        self.load_button = QtWidgets.QPushButton("Load")
+        self.load_button.clicked.connect(self.load_parameters)
+        button_layout.addWidget(self.load_button)
+
+        self.reset_button = QtWidgets.QPushButton("Reset to Default")
+        self.reset_button.clicked.connect(self.reset_to_default)
+        button_layout.addWidget(self.reset_button)
+
+        button_layout.addStretch()
+
+        self.save_button = QtWidgets.QPushButton("💾 Save DH Parameters")
+        self.save_button.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold; padding: 8px;")
+        self.save_button.clicked.connect(self.save_parameters)
+        button_layout.addWidget(self.save_button)
+
+        main_layout.addLayout(button_layout)
+
+    def load_parameters(self):
+        """Load DH parameters from file"""
+        self._loading = True
+        try:
+            if DH_PARAMS_FILE.exists():
+                with open(DH_PARAMS_FILE, 'r') as f:
+                    dh_params = json.load(f)
+
+                for link_data in dh_params['links']:
+                    row = link_data['link'] - 1
+                    self.spinboxes[(row, 'theta_offset')].setValue(link_data['theta_offset'])
+                    self.spinboxes[(row, 'd')].setValue(link_data['d'])
+                    self.spinboxes[(row, 'a')].setValue(link_data['a'])
+                    self.spinboxes[(row, 'alpha')].setValue(link_data['alpha'])
+                    direction = link_data.get('direction', 1)
+                    self.direction_combos[row].setCurrentIndex(0 if direction == 1 else 1)
+
+                logger.info("Loaded DH parameters from file")
+            else:
+                self.reset_to_default()
+        except Exception as e:
+            logger.error(f"Error loading DH parameters: {e}")
+        finally:
+            self._loading = False
+
+    def save_parameters(self):
+        """Save DH parameters to file"""
+        try:
+            descriptions = ["Base rotation", "Shoulder", "Elbow", "Wrist roll", "Wrist pitch", "Wrist yaw / TCP"]
+
+            dh_data = {
+                "version": "1.1",
+                "description": "Thor Robot DH Parameters",
+                "date_modified": QtCore.QDateTime.currentDateTime().toString("yyyy-MM-dd"),
+                "links": []
+            }
+
+            for row in range(6):
+                direction = 1 if self.direction_combos[row].currentIndex() == 0 else -1
+                link_data = {
+                    "link": row + 1,
+                    "theta_offset": self.spinboxes[(row, 'theta_offset')].value(),
+                    "direction": direction,
+                    "d": self.spinboxes[(row, 'd')].value(),
+                    "a": self.spinboxes[(row, 'a')].value(),
+                    "alpha": self.spinboxes[(row, 'alpha')].value(),
+                    "description": descriptions[row]
+                }
+                dh_data['links'].append(link_data)
+
+            with open(DH_PARAMS_FILE, 'w') as f:
+                json.dump(dh_data, f, indent=4)
+
+            reload_dh_parameters()
+            self.parameters_changed.emit()
+
+            logger.info("Saved DH parameters to file")
+            QtWidgets.QMessageBox.information(
+                self,
+                "Saved",
+                "DH parameters saved.\nVisualization updated."
+            )
+
+        except Exception as e:
+            logger.error(f"Error saving DH parameters: {e}")
+            QtWidgets.QMessageBox.critical(self, "Save Error", f"Failed to save:\n{e}")
+
+    def reset_to_default(self):
+        """Reset to default Thor DH parameters"""
+        self._loading = True
+        try:
+            default_params = [
+                {"theta_offset": 0, "direction": 1, "d": 202, "a": 0, "alpha": 90},
+                {"theta_offset": 90, "direction": 1, "d": 0, "a": 160, "alpha": 0},
+                {"theta_offset": 90, "direction": 1, "d": 0, "a": 0, "alpha": 90},
+                {"theta_offset": 0, "direction": 1, "d": 195, "a": 0, "alpha": -90},
+                {"theta_offset": 0, "direction": 1, "d": 0, "a": 0, "alpha": 90},
+                {"theta_offset": 0, "direction": 1, "d": 67.15, "a": 0, "alpha": 0},
+            ]
+
+            for row, params in enumerate(default_params):
+                self.spinboxes[(row, 'theta_offset')].setValue(params['theta_offset'])
+                self.spinboxes[(row, 'd')].setValue(params['d'])
+                self.spinboxes[(row, 'a')].setValue(params['a'])
+                self.spinboxes[(row, 'alpha')].setValue(params['alpha'])
+                self.direction_combos[row].setCurrentIndex(0 if params['direction'] == 1 else 1)
+
+            logger.info("Reset DH parameters to defaults")
+        finally:
+            self._loading = False
+
+
 class CalibrationPanel(QtWidgets.QWidget):
-    """Main calibration panel with all joints"""
+    """Main calibration panel with direction verification, gripper calibration, and DH parameters"""
 
     def __init__(self, gui_instance, parent=None):
         super().__init__(parent)
@@ -423,17 +537,13 @@ class CalibrationPanel(QtWidgets.QWidget):
 
         # Instructions
         instructions = QtWidgets.QLabel(
-            "<b>Instructions:</b><br>"
-            "1. <b>Home the robot first</b> using the Home button<br>"
-            "2. For each joint, test movement with +/- buttons<br>"
-            "3. Verify the 3D visualization matches physical robot movement<br>"
-            "4. If direction is wrong, toggle 'Reverse'<br>"
-            "5. Adjust offset if home position doesn't match 0°<br>"
-            "6. Check '✓ Verified' when joint is correct<br>"
-            "7. Click 'Save Calibration' when all joints verified"
+            "<b>Verify motor directions match visualization:</b><br>"
+            "1. Click +10° for each joint<br>"
+            "2. If physical robot moves opposite to visualization, toggle 'Reverse'<br>"
+            "3. Save when all joints are correct"
         )
         instructions.setWordWrap(True)
-        instructions.setStyleSheet("background-color: #ffffcc; padding: 10px; border: 1px solid #cccc00;")
+        instructions.setStyleSheet("background-color: #ffffcc; padding: 8px; border: 1px solid #cccc00;")
         main_layout.addWidget(instructions)
 
         # Scroll area for joint widgets
@@ -456,7 +566,6 @@ class CalibrationPanel(QtWidgets.QWidget):
 
         for joint_name, description in joint_info:
             widget = JointCalibrationWidget(joint_name, description)
-            widget.calibration_changed.connect(self.on_calibration_changed)
             widget.test_movement.connect(self.on_test_movement)
             self.joint_widgets[joint_name] = widget
             scroll_layout.addWidget(widget)
@@ -472,6 +581,16 @@ class CalibrationPanel(QtWidgets.QWidget):
         self.gripper_calibration.test_gripper.connect(self.on_test_gripper)
         scroll_layout.addWidget(self.gripper_calibration)
 
+        # Add separator before DH parameters
+        separator2 = QtWidgets.QFrame()
+        separator2.setFrameShape(QtWidgets.QFrame.HLine)
+        separator2.setStyleSheet("background-color: #ccc; margin: 10px 0;")
+        scroll_layout.addWidget(separator2)
+
+        # Add DH parameters widget
+        self.dh_parameters = DHParametersWidget()
+        scroll_layout.addWidget(self.dh_parameters)
+
         scroll_layout.addStretch()
         scroll.setWidget(scroll_content)
         main_layout.addWidget(scroll)
@@ -480,12 +599,12 @@ class CalibrationPanel(QtWidgets.QWidget):
         button_layout = QtWidgets.QHBoxLayout()
 
         self.reset_button = QtWidgets.QPushButton("Reset All")
-        self.reset_button.setToolTip("Reset all calibration to defaults (offset=0, direction=forward)")
+        self.reset_button.setToolTip("Reset all directions to Forward")
         self.reset_button.clicked.connect(self.reset_calibration)
         button_layout.addWidget(self.reset_button)
 
         self.load_button = QtWidgets.QPushButton("Load from DH Params")
-        self.load_button.setToolTip("Load calibration from dh_parameters.json")
+        self.load_button.setToolTip("Load direction settings from dh_parameters.json")
         self.load_button.clicked.connect(self.load_current_calibration)
         button_layout.addWidget(self.load_button)
 
@@ -503,11 +622,6 @@ class CalibrationPanel(QtWidgets.QWidget):
         self.status_label = QtWidgets.QLabel("Status: Ready to calibrate")
         self.status_label.setStyleSheet("background-color: #e0e0e0; padding: 5px;")
         main_layout.addWidget(self.status_label)
-
-    def on_calibration_changed(self, joint_name, offset, direction):
-        """Handle calibration value changes"""
-        logger.debug(f"Calibration changed: {joint_name} offset={offset}, direction={direction}")
-        # Could auto-update visualization here if desired
 
     def on_test_movement(self, joint_name, delta_angle):
         """Handle test movement button clicks"""
@@ -562,7 +676,7 @@ class CalibrationPanel(QtWidgets.QWidget):
             self.status_label.setStyleSheet("background-color: #ffcccc; padding: 5px;")
 
     def load_current_calibration(self):
-        """Load calibration from DH parameters file"""
+        """Load direction settings from DH parameters file"""
         try:
             dh_params = get_dh_params()
             if dh_params is None:
@@ -581,43 +695,22 @@ class CalibrationPanel(QtWidgets.QWidget):
             for i, link_data in enumerate(dh_params):
                 joint_name = link_to_joint.get(i)
                 if joint_name and joint_name in self.joint_widgets:
-                    # theta_offset in DH params is the calibration offset
-                    offset = link_data.get('theta_offset', 0.0)
                     direction = link_data.get('direction', 1)
-                    self.joint_widgets[joint_name].set_calibration(offset, direction)
+                    self.joint_widgets[joint_name].set_direction(direction)
 
-            self.status_label.setText("Status: Loaded calibration from DH parameters")
+            self.status_label.setText("Status: Loaded directions from DH parameters")
             self.status_label.setStyleSheet("background-color: #ccffcc; padding: 5px;")
-            logger.info("Loaded calibration from dh_parameters.json")
+            logger.info("Loaded direction settings from dh_parameters.json")
 
         except Exception as e:
             logger.error(f"Error loading calibration: {e}")
             logger.exception("Full traceback:")
-            self.status_label.setText(f"Status: Error loading calibration - {e}")
+            self.status_label.setText(f"Status: Error loading - {e}")
             self.status_label.setStyleSheet("background-color: #ffcccc; padding: 5px;")
 
     def save_calibration(self):
-        """Save calibration to DH parameters file"""
+        """Save direction settings to DH parameters file"""
         try:
-            # Check if all joints are verified
-            unverified = []
-            for joint_name, widget in self.joint_widgets.items():
-                if not widget.verified_checkbox.isChecked():
-                    unverified.append(joint_name)
-
-            if unverified:
-                reply = QtWidgets.QMessageBox.question(
-                    self,
-                    "Unverified Joints",
-                    f"The following joints are not verified:\n{', '.join(unverified)}\n\n"
-                    "Do you want to save anyway?",
-                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
-                    QtWidgets.QMessageBox.No
-                )
-
-                if reply == QtWidgets.QMessageBox.No:
-                    return
-
             # Load existing DH parameters to preserve geometry fields
             with open(DH_PARAMS_FILE, 'r') as f:
                 dh_data = json.load(f)
@@ -632,18 +725,12 @@ class CalibrationPanel(QtWidgets.QWidget):
                 'Art6': 5
             }
 
-            # Update only theta_offset and direction fields
+            # Update only direction field
             for joint_name, widget in self.joint_widgets.items():
-                cal = widget.get_calibration()
                 link_idx = joint_to_link[joint_name]
-
-                # Update calibration fields, preserve geometry
-                dh_data['links'][link_idx]['theta_offset'] = cal['offset']
-                dh_data['links'][link_idx]['direction'] = cal['direction']
+                dh_data['links'][link_idx]['direction'] = widget.get_direction()
 
             # Update metadata
-            dh_data['version'] = '1.1'
-            dh_data['description'] = 'Thor Robot DH Parameters with calibration'
             dh_data['date_modified'] = QtCore.QDateTime.currentDateTime().toString("yyyy-MM-dd")
 
             # Save to DH parameters file
@@ -653,19 +740,15 @@ class CalibrationPanel(QtWidgets.QWidget):
             # Reload DH parameters in FK module
             reload_dh_parameters()
 
-            self.status_label.setText("Status: ✓ Calibration saved to DH parameters!")
+            self.status_label.setText("Status: Direction settings saved!")
             self.status_label.setStyleSheet("background-color: #4CAF50; color: white; padding: 5px; font-weight: bold;")
-            logger.info("Calibration saved to dh_parameters.json")
+            logger.info("Direction settings saved to dh_parameters.json")
 
-            # Show success message
             QtWidgets.QMessageBox.information(
                 self,
-                "Calibration Saved",
-                "Calibration saved to DH parameters!\n\n"
-                "The new calibration is now active and will be used for:\n"
-                "• 3D visualization\n"
-                "• Forward kinematics\n"
-                "• All future movements"
+                "Saved",
+                "Direction settings saved to DH parameters.\n\n"
+                "Changes are now active."
             )
 
         except Exception as e:
@@ -677,16 +760,15 @@ class CalibrationPanel(QtWidgets.QWidget):
             QtWidgets.QMessageBox.critical(
                 self,
                 "Save Error",
-                f"Failed to save calibration:\n{e}"
+                f"Failed to save:\n{e}"
             )
 
     def reset_calibration(self):
-        """Reset all calibration to defaults"""
+        """Reset all directions to Forward"""
         reply = QtWidgets.QMessageBox.question(
             self,
-            "Reset Calibration",
-            "Reset all joints to default calibration?\n\n"
-            "(Offset = 0°, Direction = Forward)\n\n"
+            "Reset Directions",
+            "Reset all joints to Forward direction?\n\n"
             "This will not save automatically.",
             QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
             QtWidgets.QMessageBox.No
@@ -694,16 +776,8 @@ class CalibrationPanel(QtWidgets.QWidget):
 
         if reply == QtWidgets.QMessageBox.Yes:
             for widget in self.joint_widgets.values():
-                widget.set_calibration(0.0, 1)
-                widget.verified_checkbox.setChecked(False)
+                widget.set_direction(1)
 
-            self.status_label.setText("Status: All calibration reset to defaults")
+            self.status_label.setText("Status: All directions reset to Forward")
             self.status_label.setStyleSheet("background-color: #ffeecc; padding: 5px;")
-            logger.info("Calibration reset to defaults")
-
-    def update_firmware_angles(self, angles_dict):
-        """Update displayed firmware angles from position feedback"""
-        for joint_name, widget in self.joint_widgets.items():
-            key = joint_name.lower()
-            if key in angles_dict:
-                widget.update_firmware_angle(angles_dict[key])
+            logger.info("Directions reset to defaults")

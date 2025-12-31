@@ -205,7 +205,6 @@ class BifrostGUI(Ui_MainWindow):
 
         self.HomeButton.pressed.connect(self.sendHomingCycleCommand)
         self.ZeroPositionButton.pressed.connect(self.sendZeroPositionCommand)
-        self.KillAlarmLockButton.pressed.connect(self.sendKillAlarmCommand)
         self.EmergencyStopButton.pressed.connect(self.sendEmergencyStopCommand)
 
         # Movement type now controlled by axis column - connect its signal
@@ -278,7 +277,7 @@ class BifrostGUI(Ui_MainWindow):
 
         self.SerialPortRefreshButton.pressed.connect(self.getSerialPorts)
         self.ConnectButton.pressed.connect(self.connectSerial)
-
+    
         # Connect console input signals after replacing with HistoryLineEdit
         self.ConsoleButtonSend.pressed.connect(self.sendSerialCommand)
         self.ConsoleInput.returnPressed.connect(self.sendSerialCommand)
@@ -585,6 +584,15 @@ class BifrostGUI(Ui_MainWindow):
         # Send quick stop to freeze motors in current position
         if self.command_sender.send_if_connected("M410"):
             logger.error("E-STOP activated (M410) - Motors frozen in place. Movement halted.")
+
+        # Show message to user
+        QtWidgets.QMessageBox.warning(
+            None,
+            "E-STOP Activated",
+            "Emergency Stop activated!\n\n"
+            "Motors are frozen in place.\n"
+            "All movement has been halted."
+        )
 
     def FeedRateBoxHide(self):
         """Legacy method - feedrate visibility now handled by axis column"""

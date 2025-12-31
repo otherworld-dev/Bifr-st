@@ -129,18 +129,13 @@ class ModernMainWindow(QMainWindow):
         self.terminal_panel = TerminalModePanel()
         self.mode_stack.addWidget(self.terminal_panel)
 
-        # Mode 3: CALIBRATE
+        # Mode 3: CALIBRATE (includes DH parameters)
         from calibration_panel import CalibrationPanel
         # gui_instance will be set later by BifrostGUI
         self.calibration_panel = CalibrationPanel(gui_instance=None)
         self.mode_stack.addWidget(self.calibration_panel)
 
-        # Mode 4: DH PARAMS
-        from dh_panel import DHParametersPanel
-        self.dh_panel = DHParametersPanel()
-        self.mode_stack.addWidget(self.dh_panel)
-
-        # Mode 5: FRAMES
+        # Mode 4: FRAMES
         from frame_panel import FrameManagementPanel
         self.frames_panel = FrameManagementPanel()
         self.mode_stack.addWidget(self.frames_panel)
@@ -288,6 +283,9 @@ class ModeSelectorBar(QFrame):
         self.mode_group.addButton(self.btn_teach, 1)
         layout.addWidget(self.btn_teach)
 
+        # Stretch to push remaining buttons to the right
+        layout.addStretch()
+
         self.btn_terminal = QPushButton("🖥 TERMINAL")
         self.btn_terminal.setCheckable(True)
         self.btn_terminal.setMinimumHeight(35)
@@ -295,28 +293,19 @@ class ModeSelectorBar(QFrame):
         self.mode_group.addButton(self.btn_terminal, 2)
         layout.addWidget(self.btn_terminal)
 
-        self.btn_calibrate = QPushButton("🎯 CALIBRATE")
+        self.btn_calibrate = QPushButton("🔧 CALIBRATE")
         self.btn_calibrate.setCheckable(True)
         self.btn_calibrate.setMinimumHeight(35)
         self.btn_calibrate.setMinimumWidth(150)
         self.mode_group.addButton(self.btn_calibrate, 3)
         layout.addWidget(self.btn_calibrate)
 
-        self.btn_dh_params = QPushButton("⚙ DH PARAMS")
-        self.btn_dh_params.setCheckable(True)
-        self.btn_dh_params.setMinimumHeight(35)
-        self.btn_dh_params.setMinimumWidth(140)
-        self.mode_group.addButton(self.btn_dh_params, 4)
-        layout.addWidget(self.btn_dh_params)
-
         self.btn_frames = QPushButton("📐 FRAMES")
         self.btn_frames.setCheckable(True)
         self.btn_frames.setMinimumHeight(35)
         self.btn_frames.setMinimumWidth(120)
-        self.mode_group.addButton(self.btn_frames, 5)
+        self.mode_group.addButton(self.btn_frames, 4)
         layout.addWidget(self.btn_frames)
-
-        layout.addStretch()
 
         # Set default to INVERSE (was JOG, now removed)
         self.btn_inverse.setChecked(True)
@@ -758,24 +747,6 @@ class AxisControlColumn(QFrame):
         self.ZeroPositionButton.setToolTip("Zero all positions (G92)")
         quick_layout.addWidget(self.ZeroPositionButton)
 
-        # E-Stop / Kill Alarm button
-        self.KillAlarmLockButton = QPushButton("⚠ E-Stop")
-        self.KillAlarmLockButton.setFixedHeight(24)
-        self.KillAlarmLockButton.setStyleSheet("""
-            QPushButton {
-                font-size: 7pt;
-                border: 1px solid #c00;
-                border-radius: 2px;
-                background: #fee;
-                color: #c00;
-            }
-            QPushButton:hover {
-                background: #fcc;
-            }
-        """)
-        self.KillAlarmLockButton.setToolTip("Emergency stop / Kill alarm lock")
-        quick_layout.addWidget(self.KillAlarmLockButton)
-
         # Jog mode checkbox
         self.jog_mode_checkbox = QCheckBox("Jog Mode")
         self.jog_mode_checkbox.setStyleSheet("font-size: 7pt;")
@@ -1156,11 +1127,6 @@ class JogModePanel(QFrame):
         self.ZeroPositionButton.setMinimumHeight(40)
         self.ZeroPositionButton.setMinimumWidth(200)
         quick_layout.addWidget(self.ZeroPositionButton)
-
-        self.KillAlarmLockButton = QPushButton("⚠ E-Stop")
-        self.KillAlarmLockButton.setMinimumHeight(40)
-        self.KillAlarmLockButton.setMinimumWidth(200)
-        quick_layout.addWidget(self.KillAlarmLockButton)
 
         layout.addWidget(quick_group)
 
@@ -1636,18 +1602,13 @@ class Ui_MainWindow:
         self.terminal_panel = TerminalModePanel()
         self.mode_stack.addWidget(self.terminal_panel)
 
-        # Mode 3: CALIBRATE
+        # Mode 3: CALIBRATE (includes DH parameters)
         from calibration_panel import CalibrationPanel
         # gui_instance will be set later by BifrostGUI
         self.calibration_panel = CalibrationPanel(gui_instance=None)
         self.mode_stack.addWidget(self.calibration_panel)
 
-        # Mode 4: DH PARAMS
-        from dh_panel import DHParametersPanel
-        self.dh_panel = DHParametersPanel()
-        self.mode_stack.addWidget(self.dh_panel)
-
-        # Mode 5: FRAMES
+        # Mode 4: FRAMES
         from frame_panel import FrameManagementPanel
         self.frames_panel = FrameManagementPanel()
         self.mode_stack.addWidget(self.frames_panel)
@@ -1871,7 +1832,6 @@ class Ui_MainWindow:
         # Quick command buttons from axis column
         self.HomeButton = axis_column.HomeButton
         self.ZeroPositionButton = axis_column.ZeroPositionButton
-        self.KillAlarmLockButton = axis_column.KillAlarmLockButton
 
         # Movement type from axis column (G0/G1 buttons replaced radio buttons)
         # Create dummy radio buttons that mirror axis column state for compatibility
