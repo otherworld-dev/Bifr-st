@@ -116,35 +116,31 @@ class ModernMainWindow(QMainWindow):
         self.switch_mode(0)
 
     def setup_mode_panels(self):
-        """Create all mode-specific panels"""
-        # Mode 0: JOG
-        self.jog_panel = JogModePanel()
-        self.mode_stack.addWidget(self.jog_panel)
-
-        # Mode 1: INVERSE
+        """Create all mode-specific panels (JOG removed - controls in sidebar)"""
+        # Mode 0: INVERSE
         self.inverse_panel = InverseModePanel()
         self.mode_stack.addWidget(self.inverse_panel)
 
-        # Mode 2: TEACH
+        # Mode 1: TEACH
         self.teach_panel = TeachModePanel()
         self.mode_stack.addWidget(self.teach_panel)
 
-        # Mode 3: TERMINAL
+        # Mode 2: TERMINAL
         self.terminal_panel = TerminalModePanel()
         self.mode_stack.addWidget(self.terminal_panel)
 
-        # Mode 4: CALIBRATE
+        # Mode 3: CALIBRATE
         from calibration_panel import CalibrationPanel
         # gui_instance will be set later by BifrostGUI
         self.calibration_panel = CalibrationPanel(gui_instance=None)
         self.mode_stack.addWidget(self.calibration_panel)
 
-        # Mode 5: DH PARAMS
+        # Mode 4: DH PARAMS
         from dh_panel import DHParametersPanel
         self.dh_panel = DHParametersPanel()
         self.mode_stack.addWidget(self.dh_panel)
 
-        # Mode 6: FRAMES
+        # Mode 5: FRAMES
         from frame_panel import FrameManagementPanel
         self.frames_panel = FrameManagementPanel()
         self.mode_stack.addWidget(self.frames_panel)
@@ -226,31 +222,7 @@ class ConnectionBar(QFrame):
 
         layout.addWidget(QLabel("|"))
 
-        # Pause button (M410 - Quick Stop)
-        self.PauseButton = QPushButton("⏸ PAUSE")
-        self.PauseButton.setMinimumWidth(90)
-        self.PauseButton.setMinimumHeight(35)
-        pause_font = QtGui.QFont()
-        pause_font.setBold(True)
-        self.PauseButton.setFont(pause_font)
-        self.PauseButton.setStyleSheet("""
-            QPushButton {
-                background-color: #FF9800;
-                color: white;
-                border: 2px solid #F57C00;
-                border-radius: 3px;
-            }
-            QPushButton:hover {
-                background-color: #F57C00;
-            }
-            QPushButton:pressed {
-                background-color: #E65100;
-            }
-        """)
-        self.PauseButton.setToolTip("Quick Stop (M410) - Pause movement")
-        layout.addWidget(self.PauseButton)
-
-        # Emergency Stop button (M112 - Full Emergency Stop)
+        # Emergency Stop button - freezes motors and stops sequences
         self.EmergencyStopButton = QPushButton("🛑 E-STOP")
         self.EmergencyStopButton.setMinimumWidth(100)
         self.EmergencyStopButton.setMinimumHeight(35)
@@ -272,7 +244,7 @@ class ConnectionBar(QFrame):
                 background-color: #B71C1C;
             }
         """)
-        self.EmergencyStopButton.setToolTip("Emergency Stop (M112) - Requires M999 reset")
+        self.EmergencyStopButton.setToolTip("Emergency Stop - Freeze motors and abort sequences")
         layout.addWidget(self.EmergencyStopButton)
 
         # About button
@@ -299,62 +271,55 @@ class ModeSelectorBar(QFrame):
         layout.setContentsMargins(10, 5, 10, 5)
         layout.setSpacing(10)
 
-        # Mode buttons
+        # Mode buttons (JOG removed - axis controls now in sidebar)
         self.mode_group = QButtonGroup()
-
-        self.btn_jog = QPushButton("📐 JOG")
-        self.btn_jog.setCheckable(True)
-        self.btn_jog.setMinimumHeight(35)
-        self.btn_jog.setMinimumWidth(120)
-        self.mode_group.addButton(self.btn_jog, 0)
-        layout.addWidget(self.btn_jog)
 
         self.btn_inverse = QPushButton("🎯 INVERSE")
         self.btn_inverse.setCheckable(True)
         self.btn_inverse.setMinimumHeight(35)
         self.btn_inverse.setMinimumWidth(130)
-        self.mode_group.addButton(self.btn_inverse, 1)
+        self.mode_group.addButton(self.btn_inverse, 0)
         layout.addWidget(self.btn_inverse)
 
         self.btn_teach = QPushButton("💾 TEACH")
         self.btn_teach.setCheckable(True)
         self.btn_teach.setMinimumHeight(35)
         self.btn_teach.setMinimumWidth(120)
-        self.mode_group.addButton(self.btn_teach, 2)
+        self.mode_group.addButton(self.btn_teach, 1)
         layout.addWidget(self.btn_teach)
 
         self.btn_terminal = QPushButton("🖥 TERMINAL")
         self.btn_terminal.setCheckable(True)
         self.btn_terminal.setMinimumHeight(35)
         self.btn_terminal.setMinimumWidth(140)
-        self.mode_group.addButton(self.btn_terminal, 3)
+        self.mode_group.addButton(self.btn_terminal, 2)
         layout.addWidget(self.btn_terminal)
 
         self.btn_calibrate = QPushButton("🎯 CALIBRATE")
         self.btn_calibrate.setCheckable(True)
         self.btn_calibrate.setMinimumHeight(35)
         self.btn_calibrate.setMinimumWidth(150)
-        self.mode_group.addButton(self.btn_calibrate, 4)
+        self.mode_group.addButton(self.btn_calibrate, 3)
         layout.addWidget(self.btn_calibrate)
 
         self.btn_dh_params = QPushButton("⚙ DH PARAMS")
         self.btn_dh_params.setCheckable(True)
         self.btn_dh_params.setMinimumHeight(35)
         self.btn_dh_params.setMinimumWidth(140)
-        self.mode_group.addButton(self.btn_dh_params, 5)
+        self.mode_group.addButton(self.btn_dh_params, 4)
         layout.addWidget(self.btn_dh_params)
 
         self.btn_frames = QPushButton("📐 FRAMES")
         self.btn_frames.setCheckable(True)
         self.btn_frames.setMinimumHeight(35)
         self.btn_frames.setMinimumWidth(120)
-        self.mode_group.addButton(self.btn_frames, 6)
+        self.mode_group.addButton(self.btn_frames, 5)
         layout.addWidget(self.btn_frames)
 
         layout.addStretch()
 
-        # Set default
-        self.btn_jog.setChecked(True)
+        # Set default to INVERSE (was JOG, now removed)
+        self.btn_inverse.setChecked(True)
 
         # Connect signals
         self.mode_group.buttonClicked.connect(self.on_mode_clicked)
@@ -395,8 +360,564 @@ class ModeSelectorBar(QFrame):
                 """)
 
 
+class AxisRow(QFrame):
+    """Single axis control row with +/- buttons and value display"""
+
+    def __init__(self, joint_name, axis_label, is_gripper=False, is_cartesian=False):
+        super().__init__()
+        self.joint_name = joint_name
+        self.is_gripper = is_gripper
+        self.is_cartesian = is_cartesian
+        self.axis_label = axis_label
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(2, 2, 2, 2)
+        layout.setSpacing(1)
+
+        # Top row: Joint/axis label + indicators
+        top_row = QHBoxLayout()
+        top_row.setSpacing(2)
+
+        # Label formatting depends on mode
+        if is_gripper:
+            label_text = "Grip"
+        elif is_cartesian:
+            # Cartesian mode: "X (mm)" or "Roll (°)"
+            label_text = f"{joint_name} ({axis_label})"
+        else:
+            # Joint mode: "J1 (X)"
+            label_text = f"{joint_name} ({axis_label})"
+        self.label = QLabel(label_text)
+        self.label.setStyleSheet("font-size: 8pt; font-weight: bold;")
+        top_row.addWidget(self.label)
+
+        top_row.addStretch()
+
+        # Endstop indicator (small colored dot)
+        self.endstop_indicator = QLabel("●")
+        self.endstop_indicator.setStyleSheet("font-size: 7pt; color: #4CAF50;")  # Green = OK
+        self.endstop_indicator.setToolTip("Endstop status")
+        top_row.addWidget(self.endstop_indicator)
+
+        # Position match indicator
+        self.position_indicator = QLabel("○")
+        self.position_indicator.setStyleSheet("font-size: 7pt; color: #888;")
+        self.position_indicator.setToolTip("Position match")
+        top_row.addWidget(self.position_indicator)
+
+        layout.addLayout(top_row)
+
+        # Bottom row: [-] value [+]
+        bottom_row = QHBoxLayout()
+        bottom_row.setSpacing(2)
+
+        # Minus button
+        self.minus_btn = QPushButton("-")
+        self.minus_btn.setFixedSize(24, 24)
+        self.minus_btn.setStyleSheet("font-size: 10pt; font-weight: bold;")
+        self.minus_btn.setProperty("joint", joint_name)
+        self.minus_btn.setProperty("direction", -1)
+        bottom_row.addWidget(self.minus_btn)
+
+        # Value label (read-only)
+        self.value_label = QLabel("0.0" if not is_gripper else "0%")
+        self.value_label.setAlignment(Qt.AlignCenter)
+        self.value_label.setStyleSheet("font-size: 8pt; background: #f0f0f0; border-radius: 2px; padding: 2px;")
+        self.value_label.setMinimumWidth(40)
+        bottom_row.addWidget(self.value_label, 1)
+
+        # Plus button
+        self.plus_btn = QPushButton("+")
+        self.plus_btn.setFixedSize(24, 24)
+        self.plus_btn.setStyleSheet("font-size: 10pt; font-weight: bold;")
+        self.plus_btn.setProperty("joint", joint_name)
+        self.plus_btn.setProperty("direction", 1)
+        bottom_row.addWidget(self.plus_btn)
+
+        layout.addLayout(bottom_row)
+
+        # Separator line at bottom
+        self.setStyleSheet("AxisRow { border-bottom: 1px solid #ddd; }")
+
+    def set_value(self, value):
+        """Update the displayed value"""
+        if self.is_gripper:
+            self.value_label.setText(f"{int(value)}%")
+        elif self.is_cartesian:
+            # Cartesian mode: mm for position, ° for orientation
+            if self.joint_name in ['X', 'Y', 'Z']:
+                self.value_label.setText(f"{value:.1f}")
+            else:
+                # Roll, Pitch, Yaw - degrees
+                self.value_label.setText(f"{value:.1f}")
+        else:
+            # Joint mode - degrees
+            self.value_label.setText(f"{value:.1f}")
+
+    def set_endstop_status(self, triggered):
+        """Update endstop indicator color"""
+        if triggered:
+            self.endstop_indicator.setStyleSheet("font-size: 7pt; color: #f44336;")  # Red
+        else:
+            self.endstop_indicator.setStyleSheet("font-size: 7pt; color: #4CAF50;")  # Green
+
+    def set_position_match(self, matched):
+        """Update position match indicator"""
+        if matched:
+            self.position_indicator.setStyleSheet("font-size: 7pt; color: #4CAF50;")  # Green
+        else:
+            self.position_indicator.setStyleSheet("font-size: 7pt; color: #888;")  # Gray
+
+
+class AxisControlColumn(QFrame):
+    """Narrow vertical column with axis controls and step toggle"""
+
+    # Signal emitted when step value changes
+    step_changed = pyqtSignal(float)
+    # Signal emitted when control mode changes (joint vs cartesian)
+    mode_changed = pyqtSignal(str)  # "joint", "cartesian"
+    # Signal emitted when coordinate frame changes
+    frame_changed = pyqtSignal(str)  # frame name: "base", "tool", "world"
+    # Signal emitted when movement type changes (g0=rapid, g1=feed)
+    movement_type_changed = pyqtSignal(str)  # "G0", "G1"
+    # Signal emitted when feedrate changes
+    feedrate_changed = pyqtSignal(float)
+
+    # Control mode definitions
+    JOINT_MODE = "joint"
+    CARTESIAN_MODE = "cartesian"
+
+    def __init__(self):
+        super().__init__()
+        self.setFrameShape(QFrame.StyledPanel)
+        self.setFixedWidth(105)
+
+        self.current_step = 1.0  # Default step size
+        self.current_mode = self.JOINT_MODE  # Default to joint control
+        self.current_frame = "base"  # Default coordinate frame
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(3, 3, 3, 3)
+        layout.setSpacing(0)
+
+        # Mode selector (Joint / XYZ toggle)
+        mode_frame = QFrame()
+        mode_frame.setStyleSheet("background: #d0d0d0; border-radius: 3px;")
+        mode_layout = QHBoxLayout(mode_frame)
+        mode_layout.setContentsMargins(2, 2, 2, 2)
+        mode_layout.setSpacing(2)
+
+        self.joint_mode_btn = QPushButton("Joint")
+        self.joint_mode_btn.setCheckable(True)
+        self.joint_mode_btn.setChecked(True)
+        self.joint_mode_btn.setFixedHeight(22)
+        self.joint_mode_btn.setStyleSheet("""
+            QPushButton {
+                font-size: 8pt;
+                border: 1px solid #888;
+                border-radius: 2px;
+                background: #fff;
+            }
+            QPushButton:checked {
+                background: #2196F3;
+                color: white;
+                font-weight: bold;
+            }
+        """)
+        self.joint_mode_btn.clicked.connect(lambda: self._set_mode(self.JOINT_MODE))
+        mode_layout.addWidget(self.joint_mode_btn)
+
+        self.cartesian_mode_btn = QPushButton("XYZ")
+        self.cartesian_mode_btn.setCheckable(True)
+        self.cartesian_mode_btn.setFixedHeight(22)
+        self.cartesian_mode_btn.setStyleSheet("""
+            QPushButton {
+                font-size: 8pt;
+                border: 1px solid #888;
+                border-radius: 2px;
+                background: #fff;
+            }
+            QPushButton:checked {
+                background: #2196F3;
+                color: white;
+                font-weight: bold;
+            }
+        """)
+        self.cartesian_mode_btn.clicked.connect(lambda: self._set_mode(self.CARTESIAN_MODE))
+        mode_layout.addWidget(self.cartesian_mode_btn)
+
+        layout.addWidget(mode_frame)
+
+        # Coordinate frame selector (only visible in Cartesian mode)
+        self.frame_selector_container = QFrame()
+        self.frame_selector_container.setStyleSheet("background: #e0e0e0; border-radius: 2px;")
+        frame_sel_layout = QHBoxLayout(self.frame_selector_container)
+        frame_sel_layout.setContentsMargins(2, 2, 2, 2)
+        frame_sel_layout.setSpacing(2)
+
+        frame_label = QLabel("Frame:")
+        frame_label.setStyleSheet("font-size: 7pt;")
+        frame_sel_layout.addWidget(frame_label)
+
+        self.frame_selector = QComboBox()
+        self.frame_selector.setFixedHeight(20)
+        self.frame_selector.setStyleSheet("font-size: 7pt;")
+        self.frame_selector.addItems(["Base", "Tool", "World"])
+        self.frame_selector.currentTextChanged.connect(self._on_frame_changed)
+        frame_sel_layout.addWidget(self.frame_selector, 1)
+
+        layout.addWidget(self.frame_selector_container)
+        self.frame_selector_container.setVisible(False)  # Hidden in joint mode
+
+        # Small spacer
+        layout.addSpacing(2)
+
+        # Axis rows container (will be repopulated on mode change)
+        self.rows_container = QVBoxLayout()
+        self.rows_container.setSpacing(0)
+        layout.addLayout(self.rows_container)
+
+        # Create rows for both modes
+        self.rows = {}
+        self._create_joint_rows()
+
+        # Gripper row (always visible)
+        gripper_row = AxisRow("Gripper", "", is_gripper=True)
+        self.rows["Gripper"] = gripper_row
+        layout.addWidget(gripper_row)
+
+        # Movement type section
+        move_frame = QFrame()
+        move_frame.setStyleSheet("background: #e0e8f0; border-radius: 3px;")
+        move_layout = QVBoxLayout(move_frame)
+        move_layout.setContentsMargins(3, 3, 3, 3)
+        move_layout.setSpacing(2)
+
+        # Movement Type heading
+        move_heading = QLabel("Move Type")
+        move_heading.setStyleSheet("font-size: 7pt; font-weight: bold; color: #555;")
+        move_heading.setAlignment(Qt.AlignCenter)
+        move_layout.addWidget(move_heading)
+
+        # G0/G1 toggle row
+        move_btn_row = QHBoxLayout()
+        move_btn_row.setSpacing(2)
+
+        self.g0_btn = QPushButton("G0")
+        self.g0_btn.setCheckable(True)
+        self.g0_btn.setChecked(True)
+        self.g0_btn.setFixedHeight(20)
+        self.g0_btn.setToolTip("Rapid movement")
+        self.g0_btn.setStyleSheet("""
+            QPushButton {
+                font-size: 7pt;
+                border: 1px solid #888;
+                border-radius: 2px;
+                background: #fff;
+            }
+            QPushButton:checked {
+                background: #FF9800;
+                color: white;
+                font-weight: bold;
+            }
+        """)
+        self.g0_btn.clicked.connect(lambda: self._set_movement_type("G0"))
+        move_btn_row.addWidget(self.g0_btn)
+
+        self.g1_btn = QPushButton("G1")
+        self.g1_btn.setCheckable(True)
+        self.g1_btn.setFixedHeight(20)
+        self.g1_btn.setToolTip("Feed movement")
+        self.g1_btn.setStyleSheet("""
+            QPushButton {
+                font-size: 7pt;
+                border: 1px solid #888;
+                border-radius: 2px;
+                background: #fff;
+            }
+            QPushButton:checked {
+                background: #FF9800;
+                color: white;
+                font-weight: bold;
+            }
+        """)
+        self.g1_btn.clicked.connect(lambda: self._set_movement_type("G1"))
+        move_btn_row.addWidget(self.g1_btn)
+
+        move_layout.addLayout(move_btn_row)
+
+        # Feedrate row (only enabled when G1)
+        feed_row = QHBoxLayout()
+        feed_row.setSpacing(2)
+
+        feed_label = QLabel("F:")
+        feed_label.setStyleSheet("font-size: 7pt;")
+        feed_label.setFixedWidth(12)
+        feed_row.addWidget(feed_label)
+
+        self.feedrate_spin = QSpinBox()
+        self.feedrate_spin.setRange(1, 10000)
+        self.feedrate_spin.setValue(1000)
+        self.feedrate_spin.setSuffix("")
+        self.feedrate_spin.setFixedHeight(20)
+        self.feedrate_spin.setStyleSheet("font-size: 7pt;")
+        self.feedrate_spin.setEnabled(False)  # Disabled by default (G0 mode)
+        self.feedrate_spin.valueChanged.connect(lambda v: self.feedrate_changed.emit(float(v)))
+        feed_row.addWidget(self.feedrate_spin, 1)
+
+        move_layout.addLayout(feed_row)
+        layout.addWidget(move_frame)
+
+        self.current_movement_type = "G0"
+
+        layout.addStretch()
+
+        # Step toggle section
+        step_frame = QFrame()
+        step_frame.setStyleSheet("background: #e8e8e8; border-radius: 3px;")
+        step_layout = QVBoxLayout(step_frame)
+        step_layout.setContentsMargins(3, 3, 3, 3)
+        step_layout.setSpacing(2)
+
+        # Step buttons row
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(2)
+
+        self.step_buttons = {}
+        for step_val in [0.1, 1.0, 10.0]:
+            btn = QPushButton(f"{step_val:g}")
+            btn.setCheckable(True)
+            btn.setFixedHeight(22)
+            btn.setStyleSheet("""
+                QPushButton {
+                    font-size: 8pt;
+                    border: 1px solid #999;
+                    border-radius: 2px;
+                    background: #fff;
+                }
+                QPushButton:checked {
+                    background: #4CAF50;
+                    color: white;
+                    font-weight: bold;
+                }
+            """)
+            btn.clicked.connect(lambda checked, s=step_val: self._on_step_clicked(s))
+            self.step_buttons[step_val] = btn
+            btn_row.addWidget(btn)
+
+        # Set default step
+        self.step_buttons[1.0].setChecked(True)
+
+        step_layout.addLayout(btn_row)
+        layout.addWidget(step_frame)
+
+        # Quick commands section
+        quick_frame = QFrame()
+        quick_frame.setStyleSheet("background: #f0e8e8; border-radius: 3px;")
+        quick_layout = QVBoxLayout(quick_frame)
+        quick_layout.setContentsMargins(3, 3, 3, 3)
+        quick_layout.setSpacing(2)
+
+        # Quick Commands heading
+        quick_heading = QLabel("Quick")
+        quick_heading.setStyleSheet("font-size: 7pt; font-weight: bold; color: #555;")
+        quick_heading.setAlignment(Qt.AlignCenter)
+        quick_layout.addWidget(quick_heading)
+
+        # Home button
+        self.HomeButton = QPushButton("🏠 Home")
+        self.HomeButton.setFixedHeight(24)
+        self.HomeButton.setStyleSheet("""
+            QPushButton {
+                font-size: 7pt;
+                border: 1px solid #888;
+                border-radius: 2px;
+                background: #fff;
+            }
+            QPushButton:hover {
+                background: #e8f4e8;
+            }
+        """)
+        self.HomeButton.setToolTip("Home all axes (G28)")
+        quick_layout.addWidget(self.HomeButton)
+
+        # Zero button
+        self.ZeroPositionButton = QPushButton("Zero")
+        self.ZeroPositionButton.setFixedHeight(24)
+        self.ZeroPositionButton.setStyleSheet("""
+            QPushButton {
+                font-size: 7pt;
+                border: 1px solid #888;
+                border-radius: 2px;
+                background: #fff;
+            }
+            QPushButton:hover {
+                background: #e8e8f4;
+            }
+        """)
+        self.ZeroPositionButton.setToolTip("Zero all positions (G92)")
+        quick_layout.addWidget(self.ZeroPositionButton)
+
+        # E-Stop / Kill Alarm button
+        self.KillAlarmLockButton = QPushButton("⚠ E-Stop")
+        self.KillAlarmLockButton.setFixedHeight(24)
+        self.KillAlarmLockButton.setStyleSheet("""
+            QPushButton {
+                font-size: 7pt;
+                border: 1px solid #c00;
+                border-radius: 2px;
+                background: #fee;
+                color: #c00;
+            }
+            QPushButton:hover {
+                background: #fcc;
+            }
+        """)
+        self.KillAlarmLockButton.setToolTip("Emergency stop / Kill alarm lock")
+        quick_layout.addWidget(self.KillAlarmLockButton)
+
+        # Jog mode checkbox
+        self.jog_mode_checkbox = QCheckBox("Jog Mode")
+        self.jog_mode_checkbox.setStyleSheet("font-size: 7pt;")
+        self.jog_mode_checkbox.setToolTip("Enable immediate movement on +/- buttons")
+        self.jog_mode_checkbox.setChecked(True)  # Default enabled
+        quick_layout.addWidget(self.jog_mode_checkbox)
+
+        layout.addWidget(quick_frame)
+
+    def _create_joint_rows(self):
+        """Create axis rows for joint control mode (J1-J6)"""
+        self._clear_rows()
+        joint_data = [
+            ("J1", "X"), ("J2", "Y"), ("J3", "Z"),
+            ("J4", "U"), ("J5", "V"), ("J6", "W")
+        ]
+        for joint_name, axis_label in joint_data:
+            row = AxisRow(joint_name, axis_label, is_gripper=False)
+            self.rows[joint_name] = row
+            self.rows_container.addWidget(row)
+
+    def _create_cartesian_rows(self):
+        """Create axis rows for Cartesian control mode (X, Y, Z, Roll, Pitch, Yaw)"""
+        self._clear_rows()
+        cartesian_data = [
+            ("X", "mm"), ("Y", "mm"), ("Z", "mm"),
+            ("Roll", "°"), ("Pitch", "°"), ("Yaw", "°")
+        ]
+        for axis_name, unit in cartesian_data:
+            row = AxisRow(axis_name, unit, is_gripper=False, is_cartesian=True)
+            self.rows[axis_name] = row
+            self.rows_container.addWidget(row)
+
+    def _clear_rows(self):
+        """Remove all axis rows (except gripper)"""
+        # Keep gripper row reference
+        gripper = self.rows.get("Gripper")
+        # Clear container
+        while self.rows_container.count():
+            item = self.rows_container.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        # Reset rows dict but preserve gripper
+        self.rows = {}
+        if gripper:
+            self.rows["Gripper"] = gripper
+
+    def _set_mode(self, mode):
+        """Switch between joint and cartesian control modes"""
+        if mode == self.current_mode:
+            return
+
+        self.current_mode = mode
+
+        # Update button states
+        self.joint_mode_btn.setChecked(mode == self.JOINT_MODE)
+        self.cartesian_mode_btn.setChecked(mode == self.CARTESIAN_MODE)
+
+        # Show/hide frame selector based on mode
+        self.frame_selector_container.setVisible(mode == self.CARTESIAN_MODE)
+
+        # Recreate rows for new mode
+        if mode == self.JOINT_MODE:
+            self._create_joint_rows()
+        else:
+            self._create_cartesian_rows()
+
+        # Emit signal for external handling
+        self.mode_changed.emit(mode)
+
+    def get_mode(self):
+        """Get current control mode"""
+        return self.current_mode
+
+    def _on_frame_changed(self, frame_text):
+        """Handle coordinate frame selection change"""
+        # Convert display name to internal name
+        frame_map = {"Base": "base", "Tool": "tool", "World": "world"}
+        frame_name = frame_map.get(frame_text, "base")
+
+        if frame_name != self.current_frame:
+            self.current_frame = frame_name
+            self.frame_changed.emit(frame_name)
+
+    def get_frame(self):
+        """Get current coordinate frame"""
+        return self.current_frame
+
+    def set_available_frames(self, frames):
+        """Update the frame selector with available frames"""
+        self.frame_selector.blockSignals(True)
+        self.frame_selector.clear()
+        for frame in frames:
+            # Capitalize for display
+            display_name = frame.capitalize() if frame else "Base"
+            self.frame_selector.addItem(display_name)
+        self.frame_selector.blockSignals(False)
+
+    def _on_step_clicked(self, step_value):
+        """Handle step button click"""
+        self.current_step = step_value
+        # Uncheck all buttons except clicked one
+        for val, btn in self.step_buttons.items():
+            btn.setChecked(val == step_value)
+        self.step_changed.emit(step_value)
+
+    def get_step(self):
+        """Get current step value"""
+        return self.current_step
+
+    def _set_movement_type(self, move_type):
+        """Switch between G0 (rapid) and G1 (feed) movement types"""
+        if move_type == self.current_movement_type:
+            return
+
+        self.current_movement_type = move_type
+
+        # Update button states
+        self.g0_btn.setChecked(move_type == "G0")
+        self.g1_btn.setChecked(move_type == "G1")
+
+        # Enable/disable feedrate based on mode
+        self.feedrate_spin.setEnabled(move_type == "G1")
+
+        # Emit signal
+        self.movement_type_changed.emit(move_type)
+
+    def get_movement_type(self):
+        """Get current movement type (G0 or G1)"""
+        return self.current_movement_type
+
+    def get_feedrate(self):
+        """Get current feedrate value"""
+        return float(self.feedrate_spin.value())
+
+    def set_feedrate(self, value):
+        """Set feedrate value"""
+        self.feedrate_spin.setValue(int(value))
+
+
 class RobotStatePanel(QFrame):
-    """Right panel - always visible robot state"""
+    """Right panel - always visible robot state with 3D visualization and axis controls"""
 
     def __init__(self):
         super().__init__()
@@ -405,162 +926,21 @@ class RobotStatePanel(QFrame):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(5, 5, 5, 5)
 
-        # Title
-        title = QLabel("Robot State")
-        title_font = QtGui.QFont()
-        title_font.setPointSize(11)
-        title_font.setBold(True)
-        title.setFont(title_font)
-        layout.addWidget(title)
+        # Main content: 3D visualization (left, expanding) + Axis controls (right, fixed)
+        main_row = QHBoxLayout()
+        main_row.setSpacing(5)
 
-        # Horizontal layout: Joint table (left) + Gripper buttons (middle) + Slider (right)
-        controls_row = QHBoxLayout()
-        controls_row.setSpacing(5)
+        # 3D visualization - takes most space
+        viz_frame = QFrame()
+        viz_layout = QVBoxLayout(viz_frame)
+        viz_layout.setContentsMargins(0, 0, 0, 0)
+        viz_layout.setSpacing(5)
 
-        # Joint status table (J1-J6 only, no gripper) - expanded width
-        self.joint_table = JointStatusTable()
-        controls_row.addWidget(self.joint_table)
-
-        # Gripper control buttons (compact middle column)
-        gripper_buttons_group = QGroupBox("Gripper")
-        gripper_buttons_layout = QVBoxLayout(gripper_buttons_group)
-        gripper_buttons_layout.setContentsMargins(4, 6, 4, 4)
-        gripper_buttons_layout.setSpacing(3)
-        gripper_buttons_group.setMaximumWidth(90)
-
-        # Position display with spinbox
-        pos_row = QHBoxLayout()
-        pos_row.setSpacing(2)
-        pos_label = QLabel("Pos:")
-        pos_label.setStyleSheet("font-size: 8pt;")
-        pos_row.addWidget(pos_label)
-        self.gripper_spinbox = QSpinBox()
-        self.gripper_spinbox.setRange(0, 100)
-        self.gripper_spinbox.setValue(0)
-        self.gripper_spinbox.setSuffix("%")
-        self.gripper_spinbox.setMaximumWidth(55)
-        self.gripper_spinbox.setStyleSheet("font-size: 8pt;")
-        self.gripper_spinbox.setObjectName("SpinBoxGrip")
-        pos_row.addWidget(self.gripper_spinbox)
-        gripper_buttons_layout.addLayout(pos_row)
-
-        # Preset buttons (stacked)
-        self.gripper_open_btn = QPushButton("🔓 Open")
-        self.gripper_open_btn.setMinimumHeight(35)
-        self.gripper_open_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                font-weight: bold;
-                border-radius: 3px;
-                font-size: 9pt;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-        """)
-        gripper_buttons_layout.addWidget(self.gripper_open_btn)
-
-        self.gripper_close_btn = QPushButton("🔒 Close")
-        self.gripper_close_btn.setMinimumHeight(35)
-        self.gripper_close_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #f44336;
-                color: white;
-                font-weight: bold;
-                border-radius: 3px;
-                font-size: 9pt;
-            }
-            QPushButton:hover {
-                background-color: #d32f2f;
-            }
-        """)
-        gripper_buttons_layout.addWidget(self.gripper_close_btn)
-
-        # Quick adjustment buttons (2x2 grid, compact)
-        adj_grid = QGridLayout()
-        adj_grid.setSpacing(2)
-        adj_grid.setContentsMargins(0, 3, 0, 0)
-
-        self.gripper_inc10 = QPushButton("+10")
-        self.gripper_inc10.setMinimumHeight(30)
-        self.gripper_inc10.setStyleSheet("font-size: 9pt;")
-        adj_grid.addWidget(self.gripper_inc10, 0, 0)
-
-        self.gripper_inc1 = QPushButton("+1")
-        self.gripper_inc1.setMinimumHeight(30)
-        self.gripper_inc1.setStyleSheet("font-size: 9pt;")
-        adj_grid.addWidget(self.gripper_inc1, 0, 1)
-
-        self.gripper_dec10 = QPushButton("-10")
-        self.gripper_dec10.setMinimumHeight(30)
-        self.gripper_dec10.setStyleSheet("font-size: 9pt;")
-        adj_grid.addWidget(self.gripper_dec10, 1, 0)
-
-        self.gripper_dec1 = QPushButton("-1")
-        self.gripper_dec1.setMinimumHeight(30)
-        self.gripper_dec1.setStyleSheet("font-size: 9pt;")
-        adj_grid.addWidget(self.gripper_dec1, 1, 1)
-
-        gripper_buttons_layout.addLayout(adj_grid)
-
-        # Constrain to match table height
-        gripper_buttons_group.setMaximumHeight(225)
-        controls_row.addWidget(gripper_buttons_group)
-
-        # Gripper slider (right side, vertical) - constrained to table height
-        slider_group = QFrame()
-        slider_group.setFrameShape(QFrame.StyledPanel)
-        slider_layout = QVBoxLayout(slider_group)
-        slider_layout.setContentsMargins(2, 2, 2, 2)
-        slider_layout.setSpacing(1)
-        slider_group.setMaximumWidth(45)
-        slider_group.setMaximumHeight(225)  # Match table height
-
-        # Top label
-        open_label = QLabel("🔓")
-        open_label.setAlignment(Qt.AlignCenter)
-        open_label.setStyleSheet("font-size: 12pt;")
-        slider_layout.addWidget(open_label)
-
-        # Vertical slider - sized to fit within constrained height
-        self.gripper_slider = QtWidgets.QSlider(Qt.Vertical)
-        self.gripper_slider.setRange(0, 100)
-        self.gripper_slider.setValue(0)
-        self.gripper_slider.setTickPosition(QtWidgets.QSlider.TicksLeft)
-        self.gripper_slider.setTickInterval(25)
-        self.gripper_slider.setInvertedAppearance(False)  # 0 at bottom (closed), 100 at top (open)
-        slider_layout.addWidget(self.gripper_slider)
-
-        # Bottom label
-        closed_label = QLabel("🔒")
-        closed_label.setAlignment(Qt.AlignCenter)
-        closed_label.setStyleSheet("font-size: 12pt;")
-        slider_layout.addWidget(closed_label)
-
-        controls_row.addWidget(slider_group)
-
-        # Align controls to top of row
-        controls_row.setAlignment(Qt.AlignTop)
-
-        # Connect preset buttons - store references for bifrost.py to connect
-        self.gripper_close_btn.clicked.connect(lambda: self.gripper_slider.setValue(0))
-        self.gripper_open_btn.clicked.connect(lambda: self.gripper_slider.setValue(100))
-
-        # Connect slider and spinbox
-        self.gripper_slider.valueChanged.connect(self.gripper_spinbox.setValue)
-        self.gripper_spinbox.valueChanged.connect(self.gripper_slider.setValue)
-
-        # Add controls row to main layout
-        layout.addLayout(controls_row)
-
-        # 3D visualization - directly embedded to maximize space
-        # Create 3D canvas widget - full width and height (increased size)
         self.robot_3d_canvas = Robot3DCanvas(self, width=7.5, height=6.5, dpi=95)
-        self.robot_3d_canvas.setMinimumHeight(500)
-        layout.addWidget(self.robot_3d_canvas)
+        self.robot_3d_canvas.setMinimumHeight(450)
+        viz_layout.addWidget(self.robot_3d_canvas, 1)
 
-        # Simple controls row (compact) - at bottom
+        # Visualization controls at bottom of 3D view
         viz_controls = QHBoxLayout()
         viz_controls.setSpacing(8)
         viz_controls.setContentsMargins(0, 0, 0, 0)
@@ -571,7 +951,23 @@ class RobotStatePanel(QFrame):
         viz_controls.addWidget(self.show_trajectory_check)
         viz_controls.addWidget(self.auto_rotate_check)
         viz_controls.addStretch()
-        layout.addLayout(viz_controls)
+        viz_layout.addLayout(viz_controls)
+
+        main_row.addWidget(viz_frame, 1)  # stretch=1 to expand
+
+        # Axis control column (right side, fixed width)
+        self.axis_column = AxisControlColumn()
+        main_row.addWidget(self.axis_column)
+
+        layout.addLayout(main_row)
+
+        # Keep backward-compatible references for bifrost.py
+        # These will need to be connected differently but provide access points
+        self.joint_table = None  # Removed - use axis_column.rows instead
+        self.gripper_spinbox = None  # Removed - use axis_column.rows['Gripper'] instead
+        self.gripper_slider = None  # Removed
+        self.gripper_open_btn = None  # Removed
+        self.gripper_close_btn = None  # Removed
 
 
 class JointStatusTable(QTableWidget):
@@ -1187,35 +1583,31 @@ class Ui_MainWindow:
     """Main UI class compatible with existing bifrost.py interface"""
 
     def setup_mode_panels(self):
-        """Create all mode-specific panels"""
-        # Mode 0: JOG
-        self.jog_panel = JogModePanel()
-        self.mode_stack.addWidget(self.jog_panel)
-
-        # Mode 1: INVERSE
+        """Create all mode-specific panels (JOG removed - controls in sidebar)"""
+        # Mode 0: INVERSE
         self.inverse_panel = InverseModePanel()
         self.mode_stack.addWidget(self.inverse_panel)
 
-        # Mode 2: TEACH
+        # Mode 1: TEACH
         self.teach_panel = TeachModePanel()
         self.mode_stack.addWidget(self.teach_panel)
 
-        # Mode 3: TERMINAL
+        # Mode 2: TERMINAL
         self.terminal_panel = TerminalModePanel()
         self.mode_stack.addWidget(self.terminal_panel)
 
-        # Mode 4: CALIBRATE
+        # Mode 3: CALIBRATE
         from calibration_panel import CalibrationPanel
         # gui_instance will be set later by BifrostGUI
         self.calibration_panel = CalibrationPanel(gui_instance=None)
         self.mode_stack.addWidget(self.calibration_panel)
 
-        # Mode 5: DH PARAMS
+        # Mode 4: DH PARAMS
         from dh_panel import DHParametersPanel
         self.dh_panel = DHParametersPanel()
         self.mode_stack.addWidget(self.dh_panel)
 
-        # Mode 6: FRAMES
+        # Mode 5: FRAMES
         from frame_panel import FrameManagementPanel
         self.frames_panel = FrameManagementPanel()
         self.mode_stack.addWidget(self.frames_panel)
@@ -1317,73 +1709,91 @@ class Ui_MainWindow:
         self.BaudRateComboBox = self.top_bar.BaudRateComboBox
         self.RobotStateDisplay = self.top_bar.RobotStateDisplay
         self.ConnectButton = self.top_bar.ConnectButton
-        self.PauseButton = self.top_bar.PauseButton
         self.EmergencyStopButton = self.top_bar.EmergencyStopButton
         self.SettingsButton = self.top_bar.SettingsButton
 
-        # Joint table widgets
-        joint_table = self.robot_state_panel.joint_table
-        self.SpinBoxArt1 = joint_table.spinboxes["J1"]
-        self.SpinBoxArt2 = joint_table.spinboxes["J2"]
-        self.SpinBoxArt3 = joint_table.spinboxes["J3"]
-        self.SpinBoxArt4 = joint_table.spinboxes["J4"]
-        self.SpinBoxArt5 = joint_table.spinboxes["J5"]
-        self.SpinBoxArt6 = joint_table.spinboxes["J6"]
-        self.SpinBoxGripper = self.robot_state_panel.gripper_spinbox  # From separate gripper control
+        # Axis control column widgets (new vertical layout)
+        axis_column = self.robot_state_panel.axis_column
 
-        # Actual position labels - wrap QTableWidgetItems in wrapper class for compatibility
-        self.FKCurrentPosValueArt1 = TableItemLabelWrapper(joint_table.actual_items["J1"])
-        self.FKCurrentPosValueArt2 = TableItemLabelWrapper(joint_table.actual_items["J2"])
-        self.FKCurrentPosValueArt3 = TableItemLabelWrapper(joint_table.actual_items["J3"])
-        self.FKCurrentPosValueArt4 = TableItemLabelWrapper(joint_table.actual_items["J4"])
-        self.FKCurrentPosValueArt5 = TableItemLabelWrapper(joint_table.actual_items["J5"])
-        self.FKCurrentPosValueArt6 = TableItemLabelWrapper(joint_table.actual_items["J6"])
+        # Create hidden spinboxes for joint command values (bifrost.py expects these)
+        # The actual display is read-only labels in the axis column
+        self.SpinBoxArt1 = QDoubleSpinBox()
+        self.SpinBoxArt1.setRange(-180, 180)
+        self.SpinBoxArt1.setVisible(False)
+        self.SpinBoxArt2 = QDoubleSpinBox()
+        self.SpinBoxArt2.setRange(-90, 90)
+        self.SpinBoxArt2.setVisible(False)
+        self.SpinBoxArt3 = QDoubleSpinBox()
+        self.SpinBoxArt3.setRange(-90, 90)
+        self.SpinBoxArt3.setVisible(False)
+        self.SpinBoxArt4 = QDoubleSpinBox()
+        self.SpinBoxArt4.setRange(-180, 180)
+        self.SpinBoxArt4.setVisible(False)
+        self.SpinBoxArt5 = QDoubleSpinBox()
+        self.SpinBoxArt5.setRange(-90, 90)
+        self.SpinBoxArt5.setVisible(False)
+        self.SpinBoxArt6 = QDoubleSpinBox()
+        self.SpinBoxArt6.setRange(-180, 180)
+        self.SpinBoxArt6.setVisible(False)
+        self.SpinBoxGripper = QSpinBox()
+        self.SpinBoxGripper.setRange(0, 100)
+        self.SpinBoxGripper.setVisible(False)
 
-        # Endstop labels - also wrap for compatibility
-        self.endstopLabelArt1 = TableItemLabelWrapper(joint_table.endstop_items["J1"])
-        self.endstopLabelArt2 = TableItemLabelWrapper(joint_table.endstop_items["J2"])
-        self.endstopLabelArt3 = TableItemLabelWrapper(joint_table.endstop_items["J3"])
-        self.endstopLabelArt4 = TableItemLabelWrapper(joint_table.endstop_items["J4"])
-        self.endstopLabelArt5 = TableItemLabelWrapper(joint_table.endstop_items["J5"])
-        self.endstopLabelArt6 = TableItemLabelWrapper(joint_table.endstop_items["J6"])
+        # Actual position labels - use the value_label from axis rows
+        self.FKCurrentPosValueArt1 = axis_column.rows["J1"].value_label
+        self.FKCurrentPosValueArt2 = axis_column.rows["J2"].value_label
+        self.FKCurrentPosValueArt3 = axis_column.rows["J3"].value_label
+        self.FKCurrentPosValueArt4 = axis_column.rows["J4"].value_label
+        self.FKCurrentPosValueArt5 = axis_column.rows["J5"].value_label
+        self.FKCurrentPosValueArt6 = axis_column.rows["J6"].value_label
 
-        # Inc/Dec buttons - connect them from table (J1-J6 only)
-        for row in range(6):
-            # Map table joint names to bifrost.py expected names
-            joint_name_map = ["Art1", "Art2", "Art3", "Art4", "Art5", "Art6"]
-            joint_name = joint_name_map[row]
-            for col, delta in enumerate([-10, -1, 1, 10], start=4):
-                btn = joint_table.cellWidget(row, col)
-                # Store button references for compatibility
-                if delta == -10:
-                    setattr(self, f"FKDec10Button{joint_name}", btn)
-                elif delta == -1:
-                    setattr(self, f"FKDec1Button{joint_name}", btn)
-                elif delta == 1:
-                    setattr(self, f"FKInc1Button{joint_name}", btn)
-                elif delta == 10:
-                    setattr(self, f"FKInc10Button{joint_name}", btn)
+        # Endstop indicators - use the endstop_indicator from axis rows
+        self.endstopLabelArt1 = axis_column.rows["J1"].endstop_indicator
+        self.endstopLabelArt2 = axis_column.rows["J2"].endstop_indicator
+        self.endstopLabelArt3 = axis_column.rows["J3"].endstop_indicator
+        self.endstopLabelArt4 = axis_column.rows["J4"].endstop_indicator
+        self.endstopLabelArt5 = axis_column.rows["J5"].endstop_indicator
+        self.endstopLabelArt6 = axis_column.rows["J6"].endstop_indicator
 
-        # Gripper buttons from separate control
-        self.FKDec10ButtonGripper = self.robot_state_panel.gripper_dec10
-        self.FKDec1ButtonGripper = self.robot_state_panel.gripper_dec1
-        self.FKInc1ButtonGripper = self.robot_state_panel.gripper_inc1
-        self.FKInc10ButtonGripper = self.robot_state_panel.gripper_inc10
+        # Store axis column reference for step-aware button connections
+        self.axis_column = axis_column
 
-        # Gripper preset buttons (Close/Open)
-        self.gripper_close_btn = self.robot_state_panel.gripper_close_btn
-        self.gripper_open_btn = self.robot_state_panel.gripper_open_btn
+        # Map +/- buttons from axis rows to bifrost expected names
+        # The step size is controlled by the axis_column.current_step toggle
+        joint_mapping = [("J1", "Art1"), ("J2", "Art2"), ("J3", "Art3"),
+                         ("J4", "Art4"), ("J5", "Art5"), ("J6", "Art6")]
+        for axis_name, joint_name in joint_mapping:
+            row = axis_column.rows[axis_name]
+            # Store the +/- buttons - they will use variable step from toggle
+            setattr(self, f"FKMinusButton{joint_name}", row.minus_btn)
+            setattr(self, f"FKPlusButton{joint_name}", row.plus_btn)
 
-        # Create missing inc/dec buttons that bifrost.py expects (0.1 increments)
-        # These are hidden in modern UI but need to exist for compatibility
+        # Gripper +/- buttons
+        gripper_row = axis_column.rows["Gripper"]
+        self.FKMinusButtonGripper = gripper_row.minus_btn
+        self.FKPlusButtonGripper = gripper_row.plus_btn
+
+        # Create dummy buttons for old fixed-increment buttons (hidden, for compatibility)
         for joint in ['Art1', 'Art2', 'Art3', 'Art4', 'Art5', 'Art6']:
-            # Create dummy buttons that are not visible
-            dec_btn = QPushButton()
-            dec_btn.setVisible(False)
-            inc_btn = QPushButton()
-            inc_btn.setVisible(False)
-            setattr(self, f"FKDec0_1Button{joint}", dec_btn)
-            setattr(self, f"FKInc0_1Button{joint}", inc_btn)
+            for prefix in ['FKDec10Button', 'FKDec1Button', 'FKDec0_1Button',
+                          'FKInc0_1Button', 'FKInc1Button', 'FKInc10Button']:
+                btn = QPushButton()
+                btn.setVisible(False)
+                setattr(self, f"{prefix}{joint}", btn)
+
+        # Gripper increment buttons (hidden dummies)
+        self.FKDec10ButtonGripper = QPushButton()
+        self.FKDec10ButtonGripper.setVisible(False)
+        self.FKDec1ButtonGripper = QPushButton()
+        self.FKDec1ButtonGripper.setVisible(False)
+        self.FKInc1ButtonGripper = QPushButton()
+        self.FKInc1ButtonGripper.setVisible(False)
+        self.FKInc10ButtonGripper = QPushButton()
+        self.FKInc10ButtonGripper.setVisible(False)
+
+        # No gripper preset buttons in new UI
+        self.gripper_close_btn = None
+        self.gripper_open_btn = None
 
         # Individual Go buttons - create hidden dummy buttons
         for joint in ['Art1', 'Art2', 'Art3', 'Art4', 'Art5', 'Art6']:
@@ -1394,14 +1804,15 @@ class Ui_MainWindow:
         self.GoButtonGripper = QPushButton()
         self.GoButtonGripper.setVisible(False)
 
-        # Sliders - create hidden dummy sliders for compatibility (joints only)
+        # Sliders - create hidden dummy sliders for compatibility
         for joint in ['Art1', 'Art2', 'Art3', 'Art4', 'Art5', 'Art6']:
             slider = QtWidgets.QSlider()
             slider.setVisible(False)
             setattr(self, f"FKSlider{joint}", slider)
 
-        # Gripper slider from separate control (real slider, visible)
-        self.FKSliderGripper = self.robot_state_panel.gripper_slider
+        # Gripper slider (hidden dummy)
+        self.FKSliderGripper = QtWidgets.QSlider()
+        self.FKSliderGripper.setVisible(False)
         self.SliderGripper = self.FKSliderGripper
 
         # 3D visualization canvas and controls
@@ -1415,16 +1826,32 @@ class Ui_MainWindow:
         self.Inc1ButtonGripper = self.FKInc1ButtonGripper
         self.Inc10ButtonGripper = self.FKInc10ButtonGripper
 
-        # JOG mode widgets
-        self.G0MoveRadioButton = self.jog_panel.G0MoveRadioButton
-        self.G1MoveRadioButton = self.jog_panel.G1MoveRadioButton
-        self.FeedRateInput = self.jog_panel.FeedRateInput
-        self.FeedRateLabel = self.jog_panel.FeedRateLabel
-        self.JogModeCheckBox = self.jog_panel.JogModeCheckBox
-        self.ExecuteMovementButton = self.jog_panel.ExecuteMovementButton
-        self.HomeButton = self.jog_panel.HomeButton
-        self.ZeroPositionButton = self.jog_panel.ZeroPositionButton
-        self.KillAlarmLockButton = self.jog_panel.KillAlarmLockButton
+        # JOG mode widgets - now from axis column (JOG panel removed)
+        # Quick command buttons from axis column
+        self.HomeButton = axis_column.HomeButton
+        self.ZeroPositionButton = axis_column.ZeroPositionButton
+        self.KillAlarmLockButton = axis_column.KillAlarmLockButton
+
+        # Movement type from axis column (G0/G1 buttons replaced radio buttons)
+        # Create dummy radio buttons that mirror axis column state for compatibility
+        # Pass MainWindow as parent to prevent floating windows
+        self.G0MoveRadioButton = QRadioButton("G0", MainWindow)
+        self.G0MoveRadioButton.setChecked(True)
+        self.G0MoveRadioButton.setVisible(False)
+        self.G1MoveRadioButton = QRadioButton("G1", MainWindow)
+        self.G1MoveRadioButton.setVisible(False)
+
+        # Feedrate from axis column
+        self.FeedRateInput = axis_column.feedrate_spin
+        self.FeedRateLabel = QLabel("F:", MainWindow)  # Dummy label
+        self.FeedRateLabel.setVisible(False)
+
+        # Jog mode checkbox - create in axis column
+        self.JogModeCheckBox = axis_column.jog_mode_checkbox
+
+        # Execute button - not needed since jog mode auto-executes
+        self.ExecuteMovementButton = QPushButton("Go", MainWindow)
+        self.ExecuteMovementButton.setVisible(False)
 
         # Map FKGoAllButton to ExecuteMovementButton for compatibility
         self.FKGoAllButton = self.ExecuteMovementButton

@@ -37,6 +37,7 @@ from serial_response_router import SerialResponseRouter
 from visualization_controller import VisualizationController
 from position_history_manager import PositionHistoryManager
 from calibration_panel import load_gripper_calibration_on_startup
+from coordinate_frames import FrameManager
 
 import serial
 import time
@@ -170,7 +171,7 @@ class BifrostGUI(Ui_MainWindow):
         self.sync_commands_pending = False
 
         # Track jog mode state
-        self.jog_mode_enabled = False
+        self.jog_mode_enabled = True
 
         # Initialize command sender (will use ConsoleOutput widget)
         self.command_sender = SerialCommandSender(s0, None)  # Console widget set later after full init
@@ -205,12 +206,14 @@ class BifrostGUI(Ui_MainWindow):
         self.HomeButton.pressed.connect(self.sendHomingCycleCommand)
         self.ZeroPositionButton.pressed.connect(self.sendZeroPositionCommand)
         self.KillAlarmLockButton.pressed.connect(self.sendKillAlarmCommand)
-        self.PauseButton.pressed.connect(self.sendPauseCommand)
         self.EmergencyStopButton.pressed.connect(self.sendEmergencyStopCommand)
 
-        self.G0MoveRadioButton.clicked.connect(self.FeedRateBoxHide)
-        self.G1MoveRadioButton.clicked.connect(self.FeedRateBoxHide)
+        # Movement type now controlled by axis column - connect its signal
+        if hasattr(self, 'axis_column'):
+            self.axis_column.movement_type_changed.connect(self._onMovementTypeChanged)
+
         self.JogModeCheckBox.toggled.connect(self.toggleJogMode)
+        self.JogModeCheckBox.setChecked(True)  # Enable jog mode by default
 
         # Dynamic FK control connections (80% code reduction via loops)
         # Replace 54 individual signal connections with generic handlers
@@ -248,10 +251,30 @@ class BifrostGUI(Ui_MainWindow):
         self.Inc10ButtonGripper.pressed.connect(self.Inc10Gripper)
 
         # Gripper preset buttons (Close/Open) - connect to execute movement
-        if hasattr(self, 'gripper_close_btn'):
+        if hasattr(self, 'gripper_close_btn') and self.gripper_close_btn:
             self.gripper_close_btn.clicked.connect(lambda: self.setGripperAndMove(0))
-        if hasattr(self, 'gripper_open_btn'):
+        if hasattr(self, 'gripper_open_btn') and self.gripper_open_btn:
             self.gripper_open_btn.clicked.connect(lambda: self.setGripperAndMove(100))
+
+        # New axis control column +/- buttons (use step toggle for increment amount)
+        if hasattr(self, 'axis_column'):
+            # Connect mode change signal
+            self.axis_column.mode_changed.connect(self._onAxisControlModeChanged)
+
+            # Connect frame change signal
+            self.axis_column.frame_changed.connect(self._onCoordinateFrameChanged)
+
+            # Initial connection for joint mode (default)
+            self._connectAxisColumnButtons()
+
+            # Gripper +/- buttons (always visible regardless of mode)
+            gripper_row = self.axis_column.rows["Gripper"]
+            gripper_row.minus_btn.pressed.connect(
+                lambda: self.adjustGripperValue(-self.axis_column.get_step())
+            )
+            gripper_row.plus_btn.pressed.connect(
+                lambda: self.adjustGripperValue(self.axis_column.get_step())
+            )
 
         self.SerialPortRefreshButton.pressed.connect(self.getSerialPorts)
         self.ConnectButton.pressed.connect(self.connectSerial)
@@ -296,12 +319,17 @@ class BifrostGUI(Ui_MainWindow):
         self.IkIncButtonZ.setEnabled(True)
         self.IkDecButtonZ.setEnabled(True)
 
-        # Initialize IK Controller with callbacks
+        # Initialize Frame Manager for coordinate frame transformations
+        self.frame_manager = FrameManager()
+        logger.info(f"Frame manager initialized with frames: {self.frame_manager.list_frames()}")
+
+        # Initialize IK Controller with callbacks and frame manager
         self.ik_controller = IKController(
             output_update_callback=self._onIKOutputUpdate,
             spinbox_update_callback=self._onIKSpinboxUpdate,
             style_update_callback=self._onIKStyleUpdate,
-            move_callback=self.FKMoveAll
+            move_callback=self.FKMoveAll,
+            frame_manager=self.frame_manager
         )
 
         # Initialize FK Controller with callbacks
@@ -544,25 +572,30 @@ class BifrostGUI(Ui_MainWindow):
         """Send M999 command (RRF: Clear emergency stop / reset)"""
         self.command_sender.send_if_connected("M999")
 
-    def sendPauseCommand(self):
-        """Send M410 command (RRF: Quick stop - pause movement)"""
-        if self.command_sender.send_if_connected("M410"):
-            logger.warning("PAUSE command sent (M410) - Movement stopped")
-
     def sendEmergencyStopCommand(self):
-        """Send M112 command (RRF: Emergency stop - requires M999 to reset)"""
-        if self.command_sender.send_if_connected("M112"):
-            logger.error("EMERGENCY STOP activated (M112) - System halted! Press 'Clear E-Stop' to resume.")
-            # Update UI to show emergency stop state
-            self.updateCurrentState("Alarm")
+        """Emergency stop - halt movement immediately while keeping motors engaged.
+
+        Sends M410 (quick stop) to freeze motors in place and aborts any running sequence.
+        This prevents the robot from collapsing under gravity unlike M112 which disengages motors.
+        """
+        # Stop any running sequence first
+        if self.is_playing_sequence:
+            self.sequence_timer.stop()
+            self.sequence_controller.stop_playback()
+            self.is_playing_sequence = False
+            logger.warning("E-STOP: Sequence playback aborted")
+
+        # Send quick stop to freeze motors in current position
+        if self.command_sender.send_if_connected("M410"):
+            logger.error("E-STOP activated (M410) - Motors frozen in place. Movement halted.")
 
     def FeedRateBoxHide(self):
-        if self.G1MoveRadioButton.isChecked():
-            self.FeedRateLabel.setEnabled(True)
-            self.FeedRateInput.setEnabled(True)
-        else:
-            self.FeedRateLabel.setEnabled(False)
-            self.FeedRateInput.setEnabled(False)
+        """Legacy method - feedrate visibility now handled by axis column"""
+        pass  # No longer used, feedrate enabled/disabled in AxisControlColumn
+
+    def _onMovementTypeChanged(self, move_type):
+        """Handle movement type change from axis column (G0/G1)"""
+        logger.debug(f"Movement type changed to: {move_type}")
 
     def toggleJogMode(self, enabled):
         """
@@ -716,10 +749,148 @@ class BifrostGUI(Ui_MainWindow):
     def Inc10Gripper(self):
         self.adjustJointValue('Gripper', 10)
 
+    def adjustGripperValue(self, delta):
+        """Adjust gripper value by delta amount - used by axis column +/- buttons"""
+        self.adjustJointValue('Gripper', delta)
+
     def setGripperAndMove(self, value):
         """Set gripper to specific value and execute movement - delegates to controller"""
         preset = 'closed' if value == 0 else 'open'
         self.gripper_controller.move_to_preset(preset)
+
+# Axis Control Column Functions
+    def _connectAxisColumnButtons(self):
+        """Connect axis column +/- buttons based on current mode"""
+        if not hasattr(self, 'axis_column'):
+            return
+
+        mode = self.axis_column.get_mode()
+
+        if mode == "joint":
+            # Joint mode: J1-J6 control individual joints
+            joint_mapping = [("J1", "Art1"), ("J2", "Art2"), ("J3", "Art3"),
+                             ("J4", "Art4"), ("J5", "Art5"), ("J6", "Art6")]
+            for axis_name, joint_name in joint_mapping:
+                if axis_name in self.axis_column.rows:
+                    row = self.axis_column.rows[axis_name]
+                    # Connect minus button
+                    row.minus_btn.pressed.connect(
+                        lambda j=joint_name: self.adjustJointValue(j, -self.axis_column.get_step())
+                    )
+                    # Connect plus button
+                    row.plus_btn.pressed.connect(
+                        lambda j=joint_name: self.adjustJointValue(j, self.axis_column.get_step())
+                    )
+        else:
+            # Cartesian mode: X, Y, Z, Roll, Pitch, Yaw control via IK
+            cartesian_axes = ["X", "Y", "Z", "Roll", "Pitch", "Yaw"]
+            for axis_name in cartesian_axes:
+                if axis_name in self.axis_column.rows:
+                    row = self.axis_column.rows[axis_name]
+                    # Connect minus button
+                    row.minus_btn.pressed.connect(
+                        lambda a=axis_name: self.adjustCartesianValue(a, -self.axis_column.get_step())
+                    )
+                    # Connect plus button
+                    row.plus_btn.pressed.connect(
+                        lambda a=axis_name: self.adjustCartesianValue(a, self.axis_column.get_step())
+                    )
+
+    def _onAxisControlModeChanged(self, mode):
+        """Handle axis control column mode change (joint vs cartesian)"""
+        logger.info(f"Axis control mode changed to: {mode}")
+
+        # Reconnect buttons for new mode
+        # Note: The old buttons are deleted when rows are recreated,
+        # so we just connect the new ones
+        self._connectAxisColumnButtons()
+
+        # Update display values for the new mode
+        self._updateAxisColumnValues()
+
+    def _updateAxisColumnValues(self):
+        """Update axis column value displays based on current mode"""
+        if not hasattr(self, 'axis_column'):
+            return
+
+        mode = self.axis_column.get_mode()
+
+        if mode == "joint":
+            # Update with current joint positions
+            # This will be called by the position update callback
+            pass
+        else:
+            # Cartesian mode: Show current TCP position
+            # Get current position from IK spinboxes or FK calculation
+            if hasattr(self, 'IKInputSpinBoxX'):
+                x = self.IKInputSpinBoxX.value()
+                y = self.IKInputSpinBoxY.value()
+                z = self.IKInputSpinBoxZ.value()
+                # Update display labels if they exist
+                if "X" in self.axis_column.rows:
+                    self.axis_column.rows["X"].set_value(x)
+                if "Y" in self.axis_column.rows:
+                    self.axis_column.rows["Y"].set_value(y)
+                if "Z" in self.axis_column.rows:
+                    self.axis_column.rows["Z"].set_value(z)
+                # Roll, Pitch, Yaw default to 0 for now
+                for axis in ["Roll", "Pitch", "Yaw"]:
+                    if axis in self.axis_column.rows:
+                        self.axis_column.rows[axis].set_value(0.0)
+
+    def _onCoordinateFrameChanged(self, frame_name):
+        """Handle coordinate frame selection change"""
+        logger.info(f"Coordinate frame changed to: {frame_name}")
+
+        # Update frame manager if available
+        if hasattr(self, 'ik_controller') and self.ik_controller.frame_manager:
+            try:
+                self.ik_controller.frame_manager.set_active_frame(frame_name)
+                logger.info(f"IK controller frame set to: {frame_name}")
+            except KeyError:
+                logger.warning(f"Frame not found in frame manager: {frame_name}")
+
+        # Recalculate current position in new frame
+        self._updateAxisColumnValues()
+
+    def adjustCartesianValue(self, axis, delta):
+        """
+        Adjust Cartesian position/orientation by delta and recalculate IK.
+
+        Args:
+            axis: Axis name ('X', 'Y', 'Z', 'Roll', 'Pitch', 'Yaw')
+            delta: Amount to add to current value
+        """
+        # Update the IK input spinboxes for position axes
+        if axis in ['X', 'Y', 'Z']:
+            spinbox = getattr(self, f'IKInputSpinBox{axis}', None)
+            if spinbox:
+                new_value = spinbox.value() + delta
+                spinbox.setValue(new_value)
+
+                # Update axis column display
+                if axis in self.axis_column.rows:
+                    self.axis_column.rows[axis].set_value(new_value)
+
+        else:
+            # Roll, Pitch, Yaw - store locally and use in IK calculation
+            # For now, log and update display (full orientation IK requires extension)
+            logger.debug(f"Cartesian {axis} adjusted by {delta}")
+            if axis in self.axis_column.rows:
+                row = self.axis_column.rows[axis]
+                # Get current value from label, parse, add delta
+                try:
+                    current_text = row.value_label.text().replace('°', '').replace('mm', '')
+                    current_val = float(current_text) if current_text else 0.0
+                except ValueError:
+                    current_val = 0.0
+                new_value = current_val + delta
+                row.set_value(new_value)
+
+        # JOG MODE: If jog mode is enabled, execute movement after IK calculation
+        if self.jog_mode_enabled:
+            QtCore.QTimer.singleShot(100, self._executeIKJogMove)
+            logger.debug(f"[JOG MODE] Cartesian {axis} jogged by {delta}, executing move")
 
 # Inverse Kinematics Functions
     def _calculateIKDeferred(self):
@@ -1369,7 +1540,7 @@ class BifrostGUI(Ui_MainWindow):
         self.RobotStateDisplay.setStyleSheet(f'background-color: {color}')
 
     def _onEndstopUpdate(self, axis, text, style):
-        """Callback to update endstop label"""
+        """Callback to update endstop label/indicator"""
         # Map axis to label
         axis_to_label = {
             'X': self.endstopLabelArt1,
@@ -1381,8 +1552,19 @@ class BifrostGUI(Ui_MainWindow):
         }
         if axis in axis_to_label:
             label = axis_to_label[axis]
-            label.setText(text)
-            label.setStyleSheet(style)
+            # Check if this is a new-style indicator (AxisRow uses colored dots)
+            if hasattr(self, 'axis_column'):
+                # New axis column uses indicator dots - set color based on status
+                # Green = OK/not triggered, Red = triggered
+                is_triggered = "255, 200, 200" in style or "triggered" in text.lower()
+                if is_triggered:
+                    label.setStyleSheet("font-size: 7pt; color: #f44336;")  # Red
+                else:
+                    label.setStyleSheet("font-size: 7pt; color: #4CAF50;")  # Green
+            else:
+                # Old style - set text and full stylesheet
+                label.setText(text)
+                label.setStyleSheet(style)
 
     # Callback methods for SequenceController
     def _onSequencePointAdded(self, point_text):

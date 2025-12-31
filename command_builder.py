@@ -15,7 +15,11 @@ class CommandBuilder:
     @staticmethod
     def get_movement_params(gui) -> Tuple[str, str]:
         """
-        Extract movement type and feed rate from GUI state
+        Extract movement type and feed rate from GUI state.
+
+        Priority:
+        1. Axis control column (if it exists and has movement type controls)
+        2. JOG panel radio buttons (fallback)
 
         Args:
             gui: BifrostGUI instance with radio buttons
@@ -24,6 +28,16 @@ class CommandBuilder:
             tuple: (movement_type, feedrate_string)
                    e.g., ("G1", " F1000") or ("G0", "")
         """
+        # Check axis column first (primary source when using axis controls)
+        if hasattr(gui, 'axis_column') and hasattr(gui.axis_column, 'get_movement_type'):
+            movement_type = gui.axis_column.get_movement_type()
+            if movement_type == "G1":
+                feedrate = f" F{int(gui.axis_column.get_feedrate())}"
+            else:
+                feedrate = ""
+            return movement_type, feedrate
+
+        # Fallback to JOG panel radio buttons
         if gui.G1MoveRadioButton.isChecked():
             movement_type = "G1"
             feedrate = f" F{gui.FeedRateInput.value()}"

@@ -596,9 +596,15 @@ class Robot3DCanvas(gl.GLViewWidget):
         # PyQtGraph uses distance from center
         distance = max_reach * 2.5
 
+        # Set camera center point above the base (not at origin)
+        # This shifts the view focus up so the robot isn't centered vertically
+        center_z = z_max * 0.35  # Focus at ~35% of max height
+        self.camera_center = pg.Vector(0, 0, center_z)
+
         # Set camera position (isometric view)
-        # elevation=30°, azimuth=45°
+        # elevation=30°, azimuth=45°, centered above base
         self.setCameraPosition(distance=distance, elevation=30, azimuth=45)
+        self.opts['center'] = self.camera_center
 
         # Add grid at Z=0 (base plane)
         if self.show_grid:
@@ -1784,10 +1790,16 @@ class Robot3DCanvas(gl.GLViewWidget):
         """Reset view to default isometric angle"""
         workspace = fk.compute_workspace_envelope()
         max_reach = workspace['radius']
+        z_max = workspace['z_max']
         distance = max_reach * 2.5
+
+        # Reset camera center above base
+        center_z = z_max * 0.35
+        self.camera_center = pg.Vector(0, 0, center_z)
 
         self.rotation_angle = 45
         self.setCameraPosition(distance=distance, elevation=30, azimuth=45)
+        self.opts['center'] = self.camera_center
         logger.info("View reset to isometric")
 
     def draw(self):
