@@ -1262,6 +1262,30 @@ class InverseModePanel(QFrame):
         self.IKInputSpinBoxZ.setSuffix(" mm")
         pos_layout.addWidget(self.IKInputSpinBoxZ, 2, 1)
 
+        # A (orientation)
+        pos_layout.addWidget(QLabel("A:"), 3, 0)
+        self.IKInputSpinBoxA = QDoubleSpinBox()
+        self.IKInputSpinBoxA.setRange(-180, 180)
+        self.IKInputSpinBoxA.setDecimals(2)
+        self.IKInputSpinBoxA.setSuffix(" °")
+        pos_layout.addWidget(self.IKInputSpinBoxA, 3, 1)
+
+        # B (orientation)
+        pos_layout.addWidget(QLabel("B:"), 4, 0)
+        self.IKInputSpinBoxB = QDoubleSpinBox()
+        self.IKInputSpinBoxB.setRange(-180, 180)
+        self.IKInputSpinBoxB.setDecimals(2)
+        self.IKInputSpinBoxB.setSuffix(" °")
+        pos_layout.addWidget(self.IKInputSpinBoxB, 4, 1)
+
+        # C (orientation)
+        pos_layout.addWidget(QLabel("C:"), 5, 0)
+        self.IKInputSpinBoxC = QDoubleSpinBox()
+        self.IKInputSpinBoxC.setRange(-180, 180)
+        self.IKInputSpinBoxC.setDecimals(2)
+        self.IKInputSpinBoxC.setSuffix(" °")
+        pos_layout.addWidget(self.IKInputSpinBoxC, 5, 1)
+
         layout.addWidget(pos_group)
 
         # Calculate button
@@ -1291,6 +1315,22 @@ class InverseModePanel(QFrame):
         self.IkOutputValueZ = QLabel("--")
         self.IkOutputValueZ.setAlignment(Qt.AlignCenter)
         output_grid.addWidget(self.IkOutputValueZ, 0, 5)
+
+        # Orientation output labels (A, B, C)
+        output_grid.addWidget(QLabel("A:"), 1, 0)
+        self.IkOutputValueA = QLabel("--")
+        self.IkOutputValueA.setAlignment(Qt.AlignCenter)
+        output_grid.addWidget(self.IkOutputValueA, 1, 1)
+
+        output_grid.addWidget(QLabel("B:"), 1, 2)
+        self.IkOutputValueB = QLabel("--")
+        self.IkOutputValueB.setAlignment(Qt.AlignCenter)
+        output_grid.addWidget(self.IkOutputValueB, 1, 3)
+
+        output_grid.addWidget(QLabel("C:"), 1, 4)
+        self.IkOutputValueC = QLabel("--")
+        self.IkOutputValueC.setAlignment(Qt.AlignCenter)
+        output_grid.addWidget(self.IkOutputValueC, 1, 5)
 
         sol_layout.addLayout(output_grid)
 
@@ -1861,6 +1901,9 @@ class Ui_MainWindow:
         self.IKInputSpinBoxX = self.inverse_panel.IKInputSpinBoxX
         self.IKInputSpinBoxY = self.inverse_panel.IKInputSpinBoxY
         self.IKInputSpinBoxZ = self.inverse_panel.IKInputSpinBoxZ
+        self.IKInputSpinBoxA = self.inverse_panel.IKInputSpinBoxA
+        self.IKInputSpinBoxB = self.inverse_panel.IKInputSpinBoxB
+        self.IKInputSpinBoxC = self.inverse_panel.IKInputSpinBoxC
         self.IkIncButtonX = self.inverse_panel.IkIncButtonX
         self.IkDecButtonX = self.inverse_panel.IkDecButtonX
         self.IkIncButtonY = self.inverse_panel.IkIncButtonY
@@ -1871,6 +1914,9 @@ class Ui_MainWindow:
         self.IkOutputValueX = self.inverse_panel.IkOutputValueX
         self.IkOutputValueY = self.inverse_panel.IkOutputValueY
         self.IkOutputValueZ = self.inverse_panel.IkOutputValueZ
+        self.IkOutputValueA = self.inverse_panel.IkOutputValueA
+        self.IkOutputValueB = self.inverse_panel.IkOutputValueB
+        self.IkOutputValueC = self.inverse_panel.IkOutputValueC
 
         # Create dummy IK labels/widgets that bifrost.py checks for enabled status
         # Pass MainWindow as parent to prevent floating windows
