@@ -107,7 +107,8 @@ VISUALIZATION_CONTROLS_Y = 685
 VISUALIZATION_CONTROLS_HEIGHT = 200
 
 # Graph update intervals
-GRAPH_UPDATE_INTERVAL_MS = 2000  # milliseconds between 3D visualization updates
+# OPTIMIZED: Much faster now that we use GPU transforms instead of mesh recreation
+GRAPH_UPDATE_INTERVAL_MS = 100  # milliseconds between 3D visualization updates (10Hz)
 
 # ========== Jog Mode ==========
 JOG_MODE_WARNING_ENABLED = False  # Show confirmation dialog when enabling jog mode

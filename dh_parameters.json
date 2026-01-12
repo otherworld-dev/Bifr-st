@@ -18,7 +18,7 @@
             "direction": 1,
             "d": 0.0,
             "a": 160.0,
-            "alpha": 0.0,
+            "alpha": -4.0,
             "description": "Shoulder"
         },
         {

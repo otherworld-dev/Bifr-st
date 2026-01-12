@@ -553,6 +553,16 @@ class Robot3DCanvas(gl.GLViewWidget):
         self._fk_cache = {}
         self._fk_cache_lock = threading.Lock()
 
+        # PERFORMANCE OPTIMIZATION: Cache workspace envelope (only changes with DH params)
+        self._workspace_envelope_cache = None
+
+        # PERFORMANCE OPTIMIZATION: Persistent mesh items (reuse instead of recreate)
+        self._persistent_mesh_items = {}  # name -> GLMeshItem
+        self._persistent_meshes_initialized = False
+        self._grid_initialized = False
+        self._tcp_mesh_item = None  # Separate TCP indicator
+        self._base_frame_initialized = False  # Base frame is static
+
         # Force reload DH parameters at startup to ensure latest values
         fk.reload_dh_parameters()
         logger.info("DH parameters loaded at visualizer startup")
@@ -699,25 +709,15 @@ class Robot3DCanvas(gl.GLViewWidget):
         """Display robot at home position (all joints at 0)"""
         # Force reload DH parameters to ensure latest values are used
         fk.reload_dh_parameters()
-        # Clear FK cache since DH parameters may have changed
+        # Invalidate all caches since DH parameters may have changed
+        self.invalidate_workspace_cache()
         with self._fk_cache_lock:
             self._fk_cache.clear()
-        logger.info("DH parameters reloaded and FK cache cleared")
+        logger.info("DH parameters reloaded and caches cleared")
 
-        # Clear all items first
-        self.clear_all_items()
-
-        # Re-add grid if needed
+        # Use persistent grid
         if self.show_grid:
-            workspace = fk.compute_workspace_envelope()
-            max_reach = workspace['radius']
-            grid_size = max_reach * 2.5
-            self.grid_item = gl.GLGridItem()
-            self.grid_item.setSize(grid_size, grid_size)
-            self.grid_item.setSpacing(50, 50)
-            self.grid_item.setColor(pg.mkColor(50, 50, 50, 200))  # Dark gray grid
-            self.grid_item.translate(0, 0, 0)
-            self.addItem(self.grid_item)
+            self._ensure_grid_initialized()
 
         # Show robot at home position (all joints at 0)
         home_angles = (0, 0, 0, 0, 0, 0)
@@ -729,8 +729,13 @@ class Robot3DCanvas(gl.GLViewWidget):
         for i, pos in enumerate(home_positions):
             logger.info(f"  [{i}]: X={pos[0]:.1f}, Y={pos[1]:.1f}, Z={pos[2]:.1f}")
 
-        # Draw robot in inactive colors
-        self.draw_robot_arm(home_positions, active=False, joint_angles=home_angles)
+        # Draw robot using fast path if STL available
+        if self.use_stl and self.stl_loaded:
+            self._initialize_persistent_meshes()
+            self._ensure_meshes_in_scene()
+            self._update_robot_transforms(home_angles)
+        else:
+            self.draw_robot_arm(home_positions, active=False, joint_angles=home_angles)
 
         # Draw base coordinate frame (XYZ axes at origin)
         self.draw_base_frame(length=100)
@@ -740,7 +745,8 @@ class Robot3DCanvas(gl.GLViewWidget):
 
     def preview_dh_parameters(self, dh_params):
         """
-        Preview robot with custom DH parameters (for live editing)
+        Preview robot with custom DH parameters (for live editing).
+        NOTE: This method must recreate meshes since DH parameters change geometry.
 
         Args:
             dh_params: List of dicts with DH parameters for each link
@@ -748,24 +754,19 @@ class Robot3DCanvas(gl.GLViewWidget):
         # Apply DH parameters to FK module temporarily
         fk.apply_dh_parameters(dh_params)
 
-        # Clear FK cache since parameters changed
+        # Invalidate all caches since parameters changed
+        self.invalidate_workspace_cache()
         with self._fk_cache_lock:
             self._fk_cache.clear()
 
-        # Clear and redraw
-        self.clear_all_items()
+        # DH preview needs full redraw since geometry changes
+        # Reset persistent mesh state to force recreation with new transforms
+        self._persistent_meshes_initialized = False
+        self._base_frame_initialized = False
 
-        # Re-add grid
+        # Use persistent grid (will recreate due to invalidation)
         if self.show_grid:
-            workspace = fk.compute_workspace_envelope()
-            max_reach = workspace['radius']
-            grid_size = max_reach * 2.5
-            self.grid_item = gl.GLGridItem()
-            self.grid_item.setSize(grid_size, grid_size)
-            self.grid_item.setSpacing(50, 50)
-            self.grid_item.setColor(pg.mkColor(50, 50, 50, 200))  # Dark gray grid
-            self.grid_item.translate(0, 0, 0)
-            self.addItem(self.grid_item)
+            self._ensure_grid_initialized()
 
         # Show robot at home position (all joints at 0) with new DH parameters
         home_angles = (0, 0, 0, 0, 0, 0)
@@ -1285,15 +1286,27 @@ class Robot3DCanvas(gl.GLViewWidget):
 
     def draw_base_frame(self, length=80):
         """
-        Draw coordinate frame at base (XYZ axes) with forward direction arrow
+        Draw coordinate frame at base (XYZ axes) with forward direction arrow.
+        OPTIMIZED: Only creates items once (base frame is static).
 
         Args:
             length: Length of each axis arrow in mm
         """
-        # Remove old base frame items
+        # OPTIMIZATION: Base frame is static, only create once
+        if self._base_frame_initialized and len(self.base_frame_items) > 0:
+            # Ensure items are in scene
+            for item in self.base_frame_items:
+                if item is not None and item not in self.items:
+                    self.addItem(item)
+            return
+
+        # Remove old base frame items (if any from previous state)
         for item in self.base_frame_items:
             if item is not None:
-                self.removeItem(item)
+                try:
+                    self.removeItem(item)
+                except Exception:
+                    pass
         self.base_frame_items = []
 
         origin = np.array([0, 0, 0])
@@ -1367,6 +1380,9 @@ class Robot3DCanvas(gl.GLViewWidget):
         )
         self.addItem(arrowhead2)
         self.base_frame_items.append(arrowhead2)
+
+        self._base_frame_initialized = True
+        logger.debug("Base frame initialized (persistent)")
 
     def draw_tcp_frame(self, q1, q2, q3, q4, q5, q6, length=40):
         """
@@ -1655,6 +1671,242 @@ class Robot3DCanvas(gl.GLViewWidget):
             self._fk_cache[cache_key] = positions
             return positions
 
+    def _get_workspace_envelope_cached(self):
+        """
+        Get workspace envelope with caching (only changes when DH parameters change).
+
+        Returns:
+            Dict with 'radius', 'z_min', 'z_max'
+        """
+        if self._workspace_envelope_cache is None:
+            self._workspace_envelope_cache = fk.compute_workspace_envelope()
+        return self._workspace_envelope_cache
+
+    def invalidate_workspace_cache(self):
+        """Invalidate workspace cache (call when DH parameters change)"""
+        self._workspace_envelope_cache = None
+        self._grid_initialized = False  # Force grid recreation
+
+    def _numpy_to_qmatrix4x4(self, np_matrix):
+        """
+        Convert numpy 4x4 matrix to QMatrix4x4 for OpenGL transforms.
+
+        Args:
+            np_matrix: 4x4 numpy array
+
+        Returns:
+            QtGui.QMatrix4x4
+        """
+        # QMatrix4x4 constructor takes row-major values
+        m = QtGui.QMatrix4x4(
+            np_matrix[0, 0], np_matrix[0, 1], np_matrix[0, 2], np_matrix[0, 3],
+            np_matrix[1, 0], np_matrix[1, 1], np_matrix[1, 2], np_matrix[1, 3],
+            np_matrix[2, 0], np_matrix[2, 1], np_matrix[2, 2], np_matrix[2, 3],
+            np_matrix[3, 0], np_matrix[3, 1], np_matrix[3, 2], np_matrix[3, 3]
+        )
+        return m
+
+    def _initialize_persistent_meshes(self):
+        """
+        Create persistent mesh items for STL rendering (called once).
+        Meshes are created with identity transform and updated via setTransform().
+        """
+        if self._persistent_meshes_initialized:
+            return
+
+        if not self.use_stl or not self.stl_loaded:
+            logger.debug("STL not available, skipping persistent mesh initialization")
+            return
+
+        colors = self.colors_active
+
+        stl_mapping = [
+            ('base', colors['accent']),
+            ('art1', colors['body']),
+            ('art2', colors['body']),
+            ('art3', colors['body_dark']),
+            ('art4', colors['body']),
+            ('art5', colors['body_dark']),
+            ('gripper', colors['gripper']),
+        ]
+
+        for stl_name, color in stl_mapping:
+            mesh_data = load_stl_mesh(stl_name)
+            if mesh_data is None:
+                continue
+
+            vertices, faces = mesh_data
+            calibration = self.stl_calibration.get(stl_name)
+
+            # Apply calibration to vertices (this is static, done once)
+            calibrated_verts = self._apply_calibration(vertices, calibration)
+
+            # Create mesh item with calibrated vertices (no FK transform yet)
+            mesh_item = gl.GLMeshItem(
+                vertexes=calibrated_verts,
+                faces=faces,
+                color=color,
+                shader='edgeHilight',
+                smooth=True,
+                drawEdges=False
+            )
+            self._persistent_mesh_items[stl_name] = mesh_item
+            # Don't add to scene yet - done in update
+
+        # Create TCP indicator sphere (persistent)
+        tcp_verts, tcp_faces = create_dome_mesh(10, segments=12, rings=6)
+        tcp_bottom = tcp_verts.copy()
+        tcp_bottom[:, 2] = -tcp_bottom[:, 2]
+        tcp_sphere_verts = np.vstack([tcp_verts, tcp_bottom])
+        n_top = len(tcp_verts)
+        tcp_sphere_faces = np.vstack([tcp_faces, tcp_faces + n_top])
+
+        self._tcp_mesh_item = gl.GLMeshItem(
+            vertexes=tcp_sphere_verts,
+            faces=tcp_sphere_faces,
+            color=colors['tcp'],
+            shader='edgeHilight',
+            smooth=True,
+            drawEdges=False
+        )
+
+        self._persistent_meshes_initialized = True
+        logger.info(f"Initialized {len(self._persistent_mesh_items)} persistent mesh items")
+
+    def _apply_calibration(self, vertices, calibration):
+        """
+        Apply calibration offset/rotation/scale to vertices (static, done once).
+
+        Args:
+            vertices: Nx3 array of vertex positions
+            calibration: Optional dict with 'offset', 'rotation', 'scale'
+
+        Returns:
+            Calibrated Nx3 vertex array
+        """
+        if calibration is None:
+            return vertices.astype(np.float32)
+
+        verts = vertices.copy()
+
+        # Scale first
+        scale = calibration.get('scale', 1.0)
+        verts = verts * scale
+
+        # Offset in original STL coordinates
+        offset = calibration.get('offset', [0, 0, 0])
+        verts = verts + np.array(offset)
+
+        # Rotate to align with robot frame
+        rot = calibration.get('rotation', [0, 0, 0])
+        if any(r != 0 for r in rot):
+            R_local = euler_to_rotation_matrix(*rot)
+            verts = verts @ R_local.T
+
+        return verts.astype(np.float32)
+
+    def _update_robot_transforms(self, joint_angles):
+        """
+        Update robot mesh transforms using GPU-side setTransform() (fast path).
+
+        Args:
+            joint_angles: Tuple (q1, q2, q3, q4, q5, q6) in degrees
+        """
+        if not self._persistent_meshes_initialized:
+            self._initialize_persistent_meshes()
+
+        if not self._persistent_mesh_items:
+            return  # Fall back handled elsewhere
+
+        q1, q2, q3, q4, q5, q6 = joint_angles
+
+        # Get cumulative transforms for each joint
+        transforms = fk.compute_all_joint_transforms(q1, q2, q3, q4, q5, q6)
+
+        # Transform index mapping for each STL part
+        transform_indices = {
+            'base': 0,
+            'art1': 1,
+            'art2': 2,
+            'art3': 3,
+            'art4': 4,
+            'art5': 5,
+            'gripper': 6,
+        }
+
+        # Update each mesh transform
+        for stl_name, mesh_item in self._persistent_mesh_items.items():
+            transform_idx = transform_indices.get(stl_name, 0)
+            transform_4x4 = transforms[transform_idx]
+
+            # Convert to QMatrix4x4 and apply
+            qmatrix = self._numpy_to_qmatrix4x4(transform_4x4)
+            mesh_item.resetTransform()
+            mesh_item.applyTransform(qmatrix, local=False)
+
+        # Update TCP position
+        if self._tcp_mesh_item:
+            tcp_transform = transforms[6].copy()
+            qmatrix = self._numpy_to_qmatrix4x4(tcp_transform)
+            self._tcp_mesh_item.resetTransform()
+            self._tcp_mesh_item.applyTransform(qmatrix, local=False)
+
+    def _ensure_meshes_in_scene(self):
+        """Ensure all persistent mesh items are added to the scene."""
+        for stl_name, mesh_item in self._persistent_mesh_items.items():
+            if mesh_item not in self.items:
+                self.addItem(mesh_item)
+
+        if self._tcp_mesh_item and self._tcp_mesh_item not in self.items:
+            self.addItem(self._tcp_mesh_item)
+
+    def _remove_meshes_from_scene(self):
+        """Remove all persistent mesh items from the scene."""
+        for stl_name, mesh_item in self._persistent_mesh_items.items():
+            if mesh_item in self.items:
+                try:
+                    self.removeItem(mesh_item)
+                except Exception:
+                    pass
+
+        if self._tcp_mesh_item and self._tcp_mesh_item in self.items:
+            try:
+                self.removeItem(self._tcp_mesh_item)
+            except Exception:
+                pass
+
+    def _ensure_grid_initialized(self):
+        """
+        Initialize grid once (persistent). Only recreates if workspace changes.
+        """
+        if self._grid_initialized and self.grid_item is not None:
+            # Grid exists - just ensure it's in the scene
+            if self.grid_item not in self.items:
+                self.addItem(self.grid_item)
+            return
+
+        # Create grid using cached workspace
+        workspace = self._get_workspace_envelope_cached()
+        max_reach = workspace['radius']
+        grid_size = max_reach * 2.5
+
+        # Remove old grid if exists
+        if self.grid_item is not None:
+            try:
+                self.removeItem(self.grid_item)
+            except Exception:
+                pass
+
+        self.grid_item = gl.GLGridItem()
+        self.grid_item.setSize(grid_size, grid_size)
+        self.grid_item.setSpacing(50, 50)
+        self.grid_item.setColor(pg.mkColor(50, 50, 50, 200))
+        self.grid_item.translate(0, 0, 0)
+        self.addItem(self.grid_item)
+
+        self._grid_initialized = True
+        logger.debug("Grid initialized (persistent)")
+
     def _has_data_changed(self, current_angles, trajectory_length):
         """
         Check if visualization data has actually changed
@@ -1684,8 +1936,8 @@ class Robot3DCanvas(gl.GLViewWidget):
 
     def update_visualization(self, position_history, window_size=60, options=None):
         """
-        Update the 3D visualization with current robot state and trajectory
-        OPTIMIZED: Only redraws if data actually changed
+        Update the 3D visualization with current robot state and trajectory.
+        OPTIMIZED: Uses GPU transforms for mesh updates - no recreation.
 
         Args:
             position_history: PositionHistory object
@@ -1745,23 +1997,8 @@ class Robot3DCanvas(gl.GLViewWidget):
             self._last_joint_angles = current_angles.copy()
             self._last_trajectory_length = len(tcp_trajectory)
 
-            # Clear items (keep grid if needed)
-            self.clear_all_items()
-
-            # Re-add grid if needed
-            if self.show_grid:
-                workspace = fk.compute_workspace_envelope()
-                max_reach = workspace['radius']
-                grid_size = max_reach * 2.5
-                self.grid_item = gl.GLGridItem()
-                self.grid_item.setSize(grid_size, grid_size)
-                self.grid_item.setSpacing(50, 50)
-                self.grid_item.setColor(pg.mkColor(50, 50, 50, 200))  # Dark gray grid
-                self.grid_item.translate(0, 0, 0)
-                self.addItem(self.grid_item)
-
-            # OPTIMIZATION: Use cached FK computation
-            current_positions = self._compute_fk_cached(
+            # Extract joint angles as tuple
+            joint_angles = (
                 current_angles.get('art1', 0),
                 current_angles.get('art2', 0),
                 current_angles.get('art3', 0),
@@ -1769,26 +2006,40 @@ class Robot3DCanvas(gl.GLViewWidget):
                 current_angles.get('art5', 0),
                 current_angles.get('art6', 0)
             )
-            self.current_joint_positions = current_positions
 
-            # Draw robot arm if enabled
+            # OPTIMIZATION: Ensure grid is initialized (persistent, not recreated)
+            if self.show_grid:
+                self._ensure_grid_initialized()
+
+            # OPTIMIZATION: Use persistent meshes with GPU transforms (fast path)
             if self.show_robot:
-                # Extract joint angles as tuple for STL rendering
-                joint_angles = (
-                    current_angles.get('art1', 0),
-                    current_angles.get('art2', 0),
-                    current_angles.get('art3', 0),
-                    current_angles.get('art4', 0),
-                    current_angles.get('art5', 0),
-                    current_angles.get('art6', 0)
-                )
-                self.draw_robot_arm(current_positions, active=True, joint_angles=joint_angles)
+                if self.use_stl and self.stl_loaded:
+                    # Fast path: Update transforms on existing mesh items
+                    self._initialize_persistent_meshes()  # No-op if already done
+                    self._ensure_meshes_in_scene()
+                    self._update_robot_transforms(joint_angles)
+                else:
+                    # Fallback: Use primitive rendering (slower, recreates meshes)
+                    current_positions = self._compute_fk_cached(*joint_angles)
+                    self.current_joint_positions = current_positions
+                    self._draw_robot_primitives(current_positions, active=True)
 
-                # Draw TCP coordinate frame to show end effector orientation
+                # Draw TCP coordinate frame
                 self.draw_tcp_frame(*joint_angles, length=50)
+            else:
+                # Robot hidden - remove meshes from scene
+                self._remove_meshes_from_scene()
 
-            # Draw TCP trajectory if enabled
+            # Draw TCP trajectory if enabled (this still needs recreation for now)
             if self.show_trajectory and len(tcp_trajectory) > 1:
+                # Remove old trajectory
+                if self.trajectory_item is not None:
+                    try:
+                        self.removeItem(self.trajectory_item)
+                    except Exception:
+                        pass
+                    self.trajectory_item = None
+
                 tcp_points = [(x, y, z) for x, y, z, _ in tcp_trajectory]
                 timestamps = [t for _, _, _, t in tcp_trajectory]
                 self.draw_tcp_trajectory(tcp_points, timestamps)
@@ -1806,18 +2057,16 @@ class Robot3DCanvas(gl.GLViewWidget):
                 self.rotation_angle += 0.5
                 if self.rotation_angle >= 360:
                     self.rotation_angle = 0
-                # Update camera azimuth
-                opts = self.cameraParams()
                 self.setCameraPosition(azimuth=self.rotation_angle)
 
-            logger.debug("3D visualization updated (data changed)")
+            logger.debug("3D visualization updated (fast path)")
 
         finally:
             self._render_lock.release()
 
     def reset_view(self):
         """Reset view to default isometric angle"""
-        workspace = fk.compute_workspace_envelope()
+        workspace = self._get_workspace_envelope_cached()
         max_reach = workspace['radius']
         z_max = workspace['z_max']
         distance = max_reach * 2.5
