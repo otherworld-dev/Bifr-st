@@ -1680,6 +1680,8 @@ class BifrostGUI(Ui_MainWindow):
 
     def updateModern3DVisualization(self):
         """Update the modern GUI 3D visualisation - delegates to VisualizationController"""
+        if getattr(self, '_visualization_frozen', False):
+            return
         if not hasattr(self, 'position_canvas'):
             logger.warning("updateModern3DVisualization: position_canvas not found")
             return
@@ -1688,6 +1690,8 @@ class BifrostGUI(Ui_MainWindow):
 
     def updateEmbeddedGraph(self):
         """Update the embedded 3D robot visualisation - delegates to VisualizationController"""
+        if getattr(self, '_visualization_frozen', False):
+            return
         if not hasattr(self, 'position_canvas'):
             return
 
@@ -2120,8 +2124,10 @@ class BifrostGUI(Ui_MainWindow):
         physical state.  V's endstop reference shifts by d (small,
         corrected on next homing).
         """
+        self._visualization_frozen = True
         dialog = WAlignmentDialog(self.command_sender)
         dialog.exec_()
+        self._visualization_frozen = False
         # Re-zero both motors at current position (no physical movement)
         self.command_sender.send_if_connected("G92 V0 W0")
         # Finalize homing
