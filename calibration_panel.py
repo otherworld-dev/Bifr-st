@@ -397,12 +397,8 @@ class DHParametersWidget(QtWidgets.QWidget):
         for spinbox in self.spinboxes.values():
             spinbox.valueChanged.connect(self._on_value_changed)
 
-        # Buttons
+        # Buttons (Load/Reset only — Save is handled by the panel-level Save All)
         button_layout = QtWidgets.QHBoxLayout()
-
-        self.save_button = QtWidgets.QPushButton("Save")
-        self.save_button.clicked.connect(self.save_parameters)
-        button_layout.addWidget(self.save_button)
 
         self.load_button = QtWidgets.QPushButton("Load")
         self.load_button.clicked.connect(self.load_parameters)
@@ -488,15 +484,10 @@ class DHParametersWidget(QtWidgets.QWidget):
             self.parameters_changed.emit()
 
             logger.info("Saved DH parameters to file")
-            QtWidgets.QMessageBox.information(
-                self,
-                "Saved",
-                "DH parameters saved.\nVisualization updated."
-            )
 
         except Exception as e:
             logger.error(f"Error saving DH parameters: {e}")
-            QtWidgets.QMessageBox.critical(self, "Save Error", f"Failed to save:\n{e}")
+            raise
 
     def reset_to_default(self):
         """Reset to default Thor DH parameters"""
@@ -797,7 +788,15 @@ class CalibrationPanel(QtWidgets.QWidget):
         header = QtWidgets.QLabel("<h2>Robot Calibration</h2>")
         main_layout.addWidget(header)
 
-        # Instructions
+        # Scroll area for joint widgets
+        scroll = QtWidgets.QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+
+        scroll_content = QtWidgets.QWidget()
+        scroll_layout = QtWidgets.QVBoxLayout(scroll_content)
+
+        # Motor direction instructions (inside scroll area, above joint widgets)
         instructions = QtWidgets.QLabel(
             "<b>Verify motor directions match visualization:</b><br>"
             "1. Click +10° for each joint<br>"
@@ -806,15 +805,7 @@ class CalibrationPanel(QtWidgets.QWidget):
         )
         instructions.setWordWrap(True)
         instructions.setStyleSheet("background-color: #ffffcc; padding: 8px; border: 1px solid #cccc00;")
-        main_layout.addWidget(instructions)
-
-        # Scroll area for joint widgets
-        scroll = QtWidgets.QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
-
-        scroll_content = QtWidgets.QWidget()
-        scroll_layout = QtWidgets.QVBoxLayout(scroll_content)
+        scroll_layout.addWidget(instructions)
 
         # Create joint calibration widgets
         joint_info = [
@@ -879,6 +870,15 @@ class CalibrationPanel(QtWidgets.QWidget):
         scroll_layout.addStretch()
         scroll.setWidget(scroll_content)
         main_layout.addWidget(scroll)
+
+        # Save All button at the bottom
+        self.save_all_button = QtWidgets.QPushButton("Save All Calibration Settings")
+        self.save_all_button.setStyleSheet(
+            "background-color: #4CAF50; color: white; font-weight: bold; "
+            "padding: 8px; font-size: 13px;"
+        )
+        self.save_all_button.clicked.connect(self.save_all)
+        main_layout.addWidget(self.save_all_button)
 
         # Status bar
         self.status_label = QtWidgets.QLabel("Status: Ready to calibrate")
@@ -1007,4 +1007,42 @@ class CalibrationPanel(QtWidgets.QWidget):
             logger.debug(f"Auto-saved gripper calibration: {gripper_data}")
         except Exception as e:
             logger.error(f"Error auto-saving gripper calibration: {e}")
+
+    def save_all(self):
+        """Save all calibration settings to their respective files."""
+        errors = []
+
+        # DH parameters
+        try:
+            self.dh_parameters.save_parameters()
+        except Exception as e:
+            errors.append(f"DH parameters: {e}")
+
+        # Gripper calibration
+        try:
+            self._auto_save_gripper()
+        except Exception as e:
+            errors.append(f"Gripper calibration: {e}")
+
+        # Home position
+        try:
+            self.home_position._save()
+        except Exception as e:
+            errors.append(f"Home position: {e}")
+
+        # Park position
+        try:
+            self.park_position._save()
+        except Exception as e:
+            errors.append(f"Park position: {e}")
+
+        if errors:
+            msg = "Some settings failed to save:\n" + "\n".join(errors)
+            self.status_label.setText(f"Status: Save errors")
+            self.status_label.setStyleSheet("background-color: #ffcccc; padding: 5px;")
+            QtWidgets.QMessageBox.warning(self, "Save Errors", msg)
+        else:
+            self.status_label.setText("Status: All calibration settings saved")
+            self.status_label.setStyleSheet("background-color: #ccffcc; padding: 5px;")
+            logger.info("All calibration settings saved")
 
