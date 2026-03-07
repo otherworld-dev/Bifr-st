@@ -179,133 +179,134 @@ class JointCalibrationWidget(QtWidgets.QWidget):
 
 
 class GripperCalibrationWidget(QtWidgets.QWidget):
-    """Widget for calibrating gripper PWM range"""
+    """Widget for calibrating gripper open/closed positions via slide-observe-capture"""
 
-    # Signal emitted when gripper test command should be sent
-    test_gripper = QtCore.pyqtSignal(int)  # PWM value to test
+    test_gripper = QtCore.pyqtSignal(int)  # PWM value to send to servo
+    limits_changed = QtCore.pyqtSignal()   # Emitted when open/closed limits are captured
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._open_pwm = 255
+        self._closed_pwm = 0
         self.setup_ui()
         self.load_calibration()
 
     def setup_ui(self):
-        """Create UI elements for gripper calibration"""
         main_layout = QtWidgets.QVBoxLayout(self)
 
-        # Header
-        header_layout = QtWidgets.QHBoxLayout()
-        header_label = QtWidgets.QLabel("<b>Gripper PWM Calibration</b>")
-        header_label.setStyleSheet("font-size: 14px;")
-        header_layout.addWidget(header_label)
-        header_layout.addStretch()
-        main_layout.addLayout(header_layout)
+        header = QtWidgets.QLabel("<b>Gripper Calibration</b>")
+        header.setStyleSheet("font-size: 14px;")
+        main_layout.addWidget(header)
 
-        # Description
-        desc_label = QtWidgets.QLabel(
-            "Adjust PWM range to prevent servo stalling. "
-            "Reduce 'Closed PWM' if gripper locks up when gripping objects."
+        desc = QtWidgets.QLabel(
+            "Drag the slider to move the gripper, then capture the open and closed positions."
         )
-        desc_label.setWordWrap(True)
-        desc_label.setStyleSheet("color: gray; font-size: 10px; margin-bottom: 5px;")
-        main_layout.addWidget(desc_label)
+        desc.setWordWrap(True)
+        desc.setStyleSheet("color: #666; margin-bottom: 4px;")
+        main_layout.addWidget(desc)
 
-        # Frame for controls
         frame = QtWidgets.QFrame()
         frame.setFrameShape(QtWidgets.QFrame.StyledPanel)
-        frame_layout = QtWidgets.QGridLayout(frame)
+        frame_layout = QtWidgets.QVBoxLayout(frame)
 
-        # Row 0: Open PWM (100% position)
-        frame_layout.addWidget(QtWidgets.QLabel("Open PWM (100%):"), 0, 0)
-        self.open_pwm_spinbox = QtWidgets.QSpinBox()
-        self.open_pwm_spinbox.setRange(0, 255)
-        self.open_pwm_spinbox.setValue(255)
-        self.open_pwm_spinbox.setToolTip("PWM value when gripper is fully open")
-        frame_layout.addWidget(self.open_pwm_spinbox, 0, 1)
+        # Slider row
+        slider_row = QtWidgets.QHBoxLayout()
+        closed_label = QtWidgets.QLabel("Closed")
+        closed_label.setStyleSheet("font-weight: bold; color: #cc4444;")
+        slider_row.addWidget(closed_label)
 
-        self.test_open_btn = QtWidgets.QPushButton("Test Open")
-        self.test_open_btn.setStyleSheet("background-color: #ccffcc;")
-        self.test_open_btn.clicked.connect(lambda: self.test_gripper.emit(self.open_pwm_spinbox.value()))
-        frame_layout.addWidget(self.test_open_btn, 0, 2)
+        self.slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.slider.setRange(0, 255)
+        self.slider.setValue(128)
+        self.slider.setMinimumHeight(28)
+        slider_row.addWidget(self.slider, 1)
 
-        # Row 1: Closed PWM (0% position)
-        frame_layout.addWidget(QtWidgets.QLabel("Closed PWM (0%):"), 1, 0)
-        self.closed_pwm_spinbox = QtWidgets.QSpinBox()
-        self.closed_pwm_spinbox.setRange(0, 255)
-        self.closed_pwm_spinbox.setValue(0)
-        self.closed_pwm_spinbox.setToolTip("PWM value when gripper is fully closed - reduce to prevent stalling")
-        frame_layout.addWidget(self.closed_pwm_spinbox, 1, 1)
+        open_label = QtWidgets.QLabel("Open")
+        open_label.setStyleSheet("font-weight: bold; color: #44aa44;")
+        slider_row.addWidget(open_label)
 
-        self.test_closed_btn = QtWidgets.QPushButton("Test Closed")
-        self.test_closed_btn.setStyleSheet("background-color: #ffcccc;")
-        self.test_closed_btn.clicked.connect(lambda: self.test_gripper.emit(self.closed_pwm_spinbox.value()))
-        frame_layout.addWidget(self.test_closed_btn, 1, 2)
+        self.pwm_label = QtWidgets.QLabel("PWM: 128")
+        self.pwm_label.setMinimumWidth(60)
+        self.pwm_label.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+        self.pwm_label.setStyleSheet("color: #666;")
+        slider_row.addWidget(self.pwm_label)
 
-        # Row 2: Direct PWM test slider
-        frame_layout.addWidget(QtWidgets.QLabel("Test PWM:"), 2, 0)
-        self.test_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
-        self.test_slider.setRange(0, 255)
-        self.test_slider.setValue(128)
-        frame_layout.addWidget(self.test_slider, 2, 1)
+        frame_layout.addLayout(slider_row)
 
-        self.test_value_label = QtWidgets.QLabel("128")
-        self.test_value_label.setMinimumWidth(30)
-        frame_layout.addWidget(self.test_value_label, 2, 2)
+        # Update label live; send command on release
+        self.slider.valueChanged.connect(lambda v: self.pwm_label.setText(f"PWM: {v}"))
+        self.slider.sliderReleased.connect(lambda: self.test_gripper.emit(self.slider.value()))
 
-        # Connect slider to label update
-        self.test_slider.valueChanged.connect(lambda v: self.test_value_label.setText(str(v)))
+        # Capture buttons
+        btn_row = QtWidgets.QHBoxLayout()
 
-        # Row 3: Send test button
-        self.send_test_btn = QtWidgets.QPushButton("Send Test PWM")
-        self.send_test_btn.setStyleSheet("background-color: #ffffcc;")
-        self.send_test_btn.clicked.connect(lambda: self.test_gripper.emit(self.test_slider.value()))
-        frame_layout.addWidget(self.send_test_btn, 3, 1, 1, 2)
+        self.set_closed_btn = QtWidgets.QPushButton("Set as Closed Limit")
+        self.set_closed_btn.setStyleSheet("background-color: #ffcccc;")
+        self.set_closed_btn.clicked.connect(self._capture_closed)
+        btn_row.addWidget(self.set_closed_btn)
 
-        # Row 4: Current effective range display
-        frame_layout.addWidget(QtWidgets.QLabel("Effective Range:"), 4, 0)
-        self.range_label = QtWidgets.QLabel("0 - 255 PWM")
-        self.range_label.setStyleSheet("font-weight: bold; color: #0066cc;")
-        frame_layout.addWidget(self.range_label, 4, 1, 1, 2)
+        self.set_open_btn = QtWidgets.QPushButton("Set as Open Limit")
+        self.set_open_btn.setStyleSheet("background-color: #ccffcc;")
+        self.set_open_btn.clicked.connect(self._capture_open)
+        btn_row.addWidget(self.set_open_btn)
+
+        frame_layout.addLayout(btn_row)
+
+        # Saved limits display
+        limits_row = QtWidgets.QHBoxLayout()
+        self.closed_limit_label = QtWidgets.QLabel("Closed: 0")
+        self.closed_limit_label.setStyleSheet("font-weight: bold; color: #cc4444;")
+        limits_row.addWidget(self.closed_limit_label)
+        limits_row.addStretch()
+        self.open_limit_label = QtWidgets.QLabel("Open: 255")
+        self.open_limit_label.setStyleSheet("font-weight: bold; color: #44aa44;")
+        limits_row.addWidget(self.open_limit_label)
+        frame_layout.addLayout(limits_row)
 
         main_layout.addWidget(frame)
 
-        # Update range label when values change
-        self.open_pwm_spinbox.valueChanged.connect(self.update_range_label)
-        self.closed_pwm_spinbox.valueChanged.connect(self.update_range_label)
+    def _capture_open(self):
+        self._open_pwm = self.slider.value()
+        self._update_limit_labels()
+        self.limits_changed.emit()
 
+    def _capture_closed(self):
+        self._closed_pwm = self.slider.value()
+        self._update_limit_labels()
+        self.limits_changed.emit()
 
-    def update_range_label(self):
-        """Update the effective range display"""
-        closed = self.closed_pwm_spinbox.value()
-        open_val = self.open_pwm_spinbox.value()
-        self.range_label.setText(f"{closed} - {open_val} PWM")
+    def _update_limit_labels(self):
+        self.closed_limit_label.setText(f"Closed: {self._closed_pwm}")
+        self.open_limit_label.setText(f"Open: {self._open_pwm}")
+
+    def get_open_pwm(self):
+        return self._open_pwm
+
+    def get_closed_pwm(self):
+        return self._closed_pwm
 
     def load_calibration(self):
-        """Load gripper calibration from file or config defaults"""
         try:
             if GRIPPER_CALIBRATION_FILE.exists():
                 with open(GRIPPER_CALIBRATION_FILE, 'r') as f:
                     data = json.load(f)
-                self.open_pwm_spinbox.setValue(data.get('pwm_open', 255))
-                self.closed_pwm_spinbox.setValue(data.get('pwm_closed', 0))
+                self._open_pwm = data.get('pwm_open', 255)
+                self._closed_pwm = data.get('pwm_closed', 0)
                 logger.info("Loaded gripper calibration from file")
             else:
-                # Use config defaults
-                self.open_pwm_spinbox.setValue(config.GRIPPER_PWM_OPEN)
-                self.closed_pwm_spinbox.setValue(config.GRIPPER_PWM_CLOSED)
+                self._open_pwm = config.GRIPPER_PWM_OPEN
+                self._closed_pwm = config.GRIPPER_PWM_CLOSED
                 logger.info("Using default gripper calibration from config")
 
-            self.update_range_label()
+            self._update_limit_labels()
             self.apply_to_config()
-
         except Exception as e:
             logger.error(f"Error loading gripper calibration: {e}")
 
     def apply_to_config(self):
-        """Apply current values to the config module at runtime"""
-        config.GRIPPER_PWM_OPEN = self.open_pwm_spinbox.value()
-        config.GRIPPER_PWM_CLOSED = self.closed_pwm_spinbox.value()
-        logger.debug(f"Applied gripper PWM: open={config.GRIPPER_PWM_OPEN}, closed={config.GRIPPER_PWM_CLOSED}")
+        config.GRIPPER_PWM_OPEN = self._open_pwm
+        config.GRIPPER_PWM_CLOSED = self._closed_pwm
+        logger.debug(f"Applied gripper PWM: open={self._open_pwm}, closed={self._closed_pwm}")
 
 
 class DHParametersWidget(QtWidgets.QWidget):
@@ -833,39 +834,38 @@ class CalibrationPanel(QtWidgets.QWidget):
         # Add gripper calibration widget
         self.gripper_calibration = GripperCalibrationWidget()
         self.gripper_calibration.test_gripper.connect(self.on_test_gripper)
-        self.gripper_calibration.open_pwm_spinbox.valueChanged.connect(self._auto_save_gripper)
-        self.gripper_calibration.closed_pwm_spinbox.valueChanged.connect(self._auto_save_gripper)
+        self.gripper_calibration.limits_changed.connect(self._auto_save_gripper)
         scroll_layout.addWidget(self.gripper_calibration)
 
-        # Add separator before DH parameters
+        # Add separator before home position
         separator2 = QtWidgets.QFrame()
         separator2.setFrameShape(QtWidgets.QFrame.HLine)
         separator2.setStyleSheet("background-color: #ccc; margin: 10px 0;")
         scroll_layout.addWidget(separator2)
-
-        # Add DH parameters widget
-        self.dh_parameters = DHParametersWidget()
-        scroll_layout.addWidget(self.dh_parameters)
-
-        # Add separator before home position
-        separator3 = QtWidgets.QFrame()
-        separator3.setFrameShape(QtWidgets.QFrame.HLine)
-        separator3.setStyleSheet("background-color: #ccc; margin: 10px 0;")
-        scroll_layout.addWidget(separator3)
 
         # Add home position widget
         self.home_position = HomePositionWidget()
         scroll_layout.addWidget(self.home_position)
 
         # Add separator before park position
+        separator3 = QtWidgets.QFrame()
+        separator3.setFrameShape(QtWidgets.QFrame.HLine)
+        separator3.setStyleSheet("background-color: #ccc; margin: 10px 0;")
+        scroll_layout.addWidget(separator3)
+
+        # Add park position widget
+        self.park_position = ParkPositionWidget()
+        scroll_layout.addWidget(self.park_position)
+
+        # Add separator before DH parameters
         separator4 = QtWidgets.QFrame()
         separator4.setFrameShape(QtWidgets.QFrame.HLine)
         separator4.setStyleSheet("background-color: #ccc; margin: 10px 0;")
         scroll_layout.addWidget(separator4)
 
-        # Add park position widget
-        self.park_position = ParkPositionWidget()
-        scroll_layout.addWidget(self.park_position)
+        # Add DH parameters widget (advanced, rarely changed)
+        self.dh_parameters = DHParametersWidget()
+        scroll_layout.addWidget(self.dh_parameters)
 
         scroll_layout.addStretch()
         scroll.setWidget(scroll_content)
@@ -995,11 +995,11 @@ class CalibrationPanel(QtWidgets.QWidget):
             self.status_label.setStyleSheet("background-color: #ffcccc; padding: 5px;")
 
     def _auto_save_gripper(self):
-        """Auto-save gripper calibration when spinbox values change."""
+        """Auto-save gripper calibration when limits change."""
         try:
             gripper_data = {
-                'pwm_open': self.gripper_calibration.open_pwm_spinbox.value(),
-                'pwm_closed': self.gripper_calibration.closed_pwm_spinbox.value()
+                'pwm_open': self.gripper_calibration.get_open_pwm(),
+                'pwm_closed': self.gripper_calibration.get_closed_pwm()
             }
             with open(GRIPPER_CALIBRATION_FILE, 'w') as f:
                 json.dump(gripper_data, f, indent=4)
