@@ -87,7 +87,8 @@ GRIPPER_PWM_CLOSED = 0
 
 # ========== Position History ==========
 POSITION_HISTORY_MAX_SIZE = 5000  # Maximum snapshots to keep in memory
-POSITION_HISTORY_SAMPLE_RATE = 10  # Record every Nth position update (1=all, 10=every 10th) - optimized for memory
+POSITION_HISTORY_SAMPLE_RATE = 1  # Record every Nth position update (1=all, 10=every 10th)
+TRAJECTORY_INTERPOLATION_STEPS = 20  # FK subdivisions between snapshots for smooth TCP trajectory
 POSITION_HISTORY_AUTO_SAVE_INTERVAL = 300  # seconds (5 minutes, 0=disabled)
 POSITION_HISTORY_PLOT_UPDATE_INTERVAL = 1000  # milliseconds
 POSITION_HISTORY_PLOT_WINDOW_SIZE = 100  # Number of recent points to show in real-time plot

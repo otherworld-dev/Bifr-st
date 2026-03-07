@@ -582,6 +582,8 @@ class Robot3DCanvas(gl.GLViewWidget):
         self.tcp_item = None
         self.base_item = None
         self.trajectory_item = None
+        self.sequence_preview_item = None  # Separate GL item for sequence preview path
+        self._sequence_preview_points = None  # Cached dense TCP points from sequence
         self.grid_item = None
         self.grid_label_items = []  # Coordinate labels on grid
         self.base_frame_items = []
@@ -871,6 +873,7 @@ class Robot3DCanvas(gl.GLViewWidget):
             self.tcp_item,
             self.base_item,
             self.trajectory_item,
+            self.sequence_preview_item,
             self.tool_direction_item,
             self.base_front_item,
             self.workspace_item,
@@ -927,6 +930,8 @@ class Robot3DCanvas(gl.GLViewWidget):
         self.tcp_item = None
         self.base_item = None
         self.trajectory_item = None
+        self.sequence_preview_item = None
+        self._sequence_preview_points = None
         self.tool_direction_item = None
         self.base_front_item = None
         self.workspace_item = None
@@ -1382,6 +1387,60 @@ class Robot3DCanvas(gl.GLViewWidget):
             mode='line_strip'
         )
         self.addItem(self.trajectory_item)
+
+    def set_sequence_preview(self, tcp_points):
+        """
+        Set sequence preview trajectory data and trigger redraw.
+
+        Args:
+            tcp_points: List of (x, y, z) tuples from compute_trajectory_from_waypoints(),
+                        or None/empty to clear the preview.
+        """
+        # Remove old preview
+        if self.sequence_preview_item is not None:
+            try:
+                self.removeItem(self.sequence_preview_item)
+            except Exception:
+                pass
+            self.sequence_preview_item = None
+
+        if not tcp_points or len(tcp_points) < 2:
+            self._sequence_preview_points = None
+            return
+
+        self._sequence_preview_points = tcp_points
+        self._draw_sequence_preview()
+
+    def _draw_sequence_preview(self):
+        """Draw the cached sequence preview path as a green line."""
+        points = self._sequence_preview_points
+        if not points or len(points) < 2:
+            return
+
+        positions = np.array(points)
+
+        # Apply base-in-world transform
+        B = self._base_world_transform
+        if not np.allclose(B, np.eye(4)):
+            R = B[:3, :3]
+            t = B[:3, 3]
+            positions = (positions @ R.T) + t
+
+        # Green gradient: dim green → bright green
+        n = len(positions)
+        colors = np.zeros((n, 4))
+        for i in range(n):
+            t = i / (n - 1)
+            colors[i] = [0.1, 0.4 + 0.6 * t, 0.1, 0.7]
+
+        self.sequence_preview_item = gl.GLLinePlotItem(
+            pos=positions,
+            color=colors,
+            width=3,
+            antialias=True,
+            mode='line_strip'
+        )
+        self.addItem(self.sequence_preview_item)
 
     def draw_base_frame(self, length=80):
         """

@@ -16,6 +16,71 @@ import config
 
 logger = logging.getLogger(__name__)
 
+
+class CollapsibleSection(QtWidgets.QWidget):
+    """A section with a clickable header that toggles content visibility."""
+
+    expanded = QtCore.pyqtSignal(object)  # Emitted with self when section expands
+
+    def __init__(self, title, is_expanded=True, parent=None):
+        super().__init__(parent)
+        self._title = title
+        self._expanded = is_expanded
+
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
+
+        self.toggle_btn = QtWidgets.QPushButton()
+        self.toggle_btn.setStyleSheet("""
+            QPushButton {
+                text-align: left;
+                font-weight: bold;
+                font-size: 13px;
+                padding: 6px 10px;
+                background-color: #e0e0e0;
+                border: 1px solid #ccc;
+                border-radius: 3px;
+            }
+            QPushButton:hover { background-color: #d0d0d0; }
+        """)
+        self.toggle_btn.clicked.connect(self._toggle)
+        layout.addWidget(self.toggle_btn)
+
+        self.content = QtWidgets.QWidget()
+        self.content_layout = QtWidgets.QVBoxLayout(self.content)
+        self.content_layout.setContentsMargins(0, 4, 0, 0)
+        layout.addWidget(self.content)
+
+        self._update_header()
+        if not is_expanded:
+            self.content.hide()
+
+    def _toggle(self):
+        self._expanded = not self._expanded
+        self.content.setVisible(self._expanded)
+        self._update_header()
+        if self._expanded:
+            self.expanded.emit(self)
+
+    def collapse(self):
+        """Collapse this section programmatically."""
+        if self._expanded:
+            self._expanded = False
+            self.content.hide()
+            self._update_header()
+
+    def _update_header(self):
+        arrow = "\u25BC" if self._expanded else "\u25B6"
+        self.toggle_btn.setText(f"{arrow}  {self._title}")
+
+    def add_widget(self, widget):
+        self.content_layout.addWidget(widget)
+
+    def add_layout(self, layout):
+        self.content_layout.addLayout(layout)
+
+
 # DH parameters file path
 DH_PARAMS_FILE = paths.get_data_dir() / 'dh_parameters.json'
 GRIPPER_CALIBRATION_FILE = paths.get_data_dir() / 'gripper_calibration.json'
@@ -81,7 +146,7 @@ def load_park_position_on_startup():
 
 
 class JointCalibrationWidget(QtWidgets.QWidget):
-    """Widget for verifying direction of a single joint"""
+    """Compact single-row widget for verifying direction of a single joint"""
 
     test_movement = QtCore.pyqtSignal(str, float)  # joint_name, delta_angle
     direction_changed = QtCore.pyqtSignal(str, int)  # joint_name, direction (+1 or -1)
@@ -91,74 +156,51 @@ class JointCalibrationWidget(QtWidgets.QWidget):
         self.joint_name = joint_name
         self.joint_description = joint_description
         self.current_direction = 1
-
         self.setup_ui()
 
     def setup_ui(self):
-        """Create UI elements for this joint"""
-        # Main layout
-        main_layout = QtWidgets.QVBoxLayout(self)
-        main_layout.setContentsMargins(5, 5, 5, 5)
+        layout = QtWidgets.QHBoxLayout(self)
+        layout.setContentsMargins(4, 2, 4, 2)
 
-        # Frame for controls
-        frame = QtWidgets.QFrame()
-        frame.setFrameShape(QtWidgets.QFrame.StyledPanel)
-        frame_layout = QtWidgets.QGridLayout(frame)
-        frame_layout.setContentsMargins(10, 8, 10, 8)
-
-        # Row 0: Joint name and description + Direction control
-        header_label = QtWidgets.QLabel(f"<b>{self.joint_name}</b>")
-        header_label.setStyleSheet("font-size: 13px;")
-        frame_layout.addWidget(header_label, 0, 0)
+        name_label = QtWidgets.QLabel(f"<b>{self.joint_name}</b>")
+        name_label.setMinimumWidth(35)
+        layout.addWidget(name_label)
 
         desc_label = QtWidgets.QLabel(self.joint_description)
-        desc_label.setStyleSheet("color: gray; font-size: 10px;")
-        frame_layout.addWidget(desc_label, 0, 1)
+        desc_label.setStyleSheet("color: #666;")
+        desc_label.setMinimumWidth(140)
+        layout.addWidget(desc_label)
 
-        # Direction control on same row
-        direction_layout = QtWidgets.QHBoxLayout()
+        layout.addStretch()
+
+        # Test buttons
+        self.test_minus = QtWidgets.QPushButton("\u221210\u00b0")
+        self.test_minus.setFixedWidth(45)
+        self.test_minus.setStyleSheet("background-color: #ffcccc;")
+        self.test_minus.clicked.connect(lambda: self.test_movement.emit(self.joint_name, -10))
+        layout.addWidget(self.test_minus)
+
+        self.test_plus = QtWidgets.QPushButton("+10\u00b0")
+        self.test_plus.setFixedWidth(45)
+        self.test_plus.setStyleSheet("background-color: #ccffcc;")
+        self.test_plus.clicked.connect(lambda: self.test_movement.emit(self.joint_name, 10))
+        layout.addWidget(self.test_plus)
+
+        layout.addSpacing(10)
+
+        # Direction toggle
         self.direction_button_group = QtWidgets.QButtonGroup(self)
-
-        self.forward_radio = QtWidgets.QRadioButton("Forward")
+        self.forward_radio = QtWidgets.QRadioButton("Fwd")
         self.forward_radio.setChecked(True)
         self.direction_button_group.addButton(self.forward_radio, 1)
-        direction_layout.addWidget(self.forward_radio)
+        layout.addWidget(self.forward_radio)
 
-        self.reverse_radio = QtWidgets.QRadioButton("Reverse")
+        self.reverse_radio = QtWidgets.QRadioButton("Rev")
         self.direction_button_group.addButton(self.reverse_radio, -1)
-        direction_layout.addWidget(self.reverse_radio)
+        layout.addWidget(self.reverse_radio)
 
-        frame_layout.addLayout(direction_layout, 0, 2)
-
-        # Row 1: Test movement buttons
-        frame_layout.addWidget(QtWidgets.QLabel("Test:"), 1, 0)
-
-        test_btn_layout = QtWidgets.QHBoxLayout()
-        self.test_minus_10 = QtWidgets.QPushButton("-10°")
-        self.test_minus_10.setStyleSheet("background-color: #ffcccc;")
-        self.test_minus_1 = QtWidgets.QPushButton("-1°")
-        self.test_minus_1.setStyleSheet("background-color: #ffcccc;")
-        self.test_plus_1 = QtWidgets.QPushButton("+1°")
-        self.test_plus_1.setStyleSheet("background-color: #ccffcc;")
-        self.test_plus_10 = QtWidgets.QPushButton("+10°")
-        self.test_plus_10.setStyleSheet("background-color: #ccffcc;")
-
-        test_btn_layout.addWidget(self.test_minus_10)
-        test_btn_layout.addWidget(self.test_minus_1)
-        test_btn_layout.addWidget(self.test_plus_1)
-        test_btn_layout.addWidget(self.test_plus_10)
-        frame_layout.addLayout(test_btn_layout, 1, 1, 1, 2)
-
-        main_layout.addWidget(frame)
-
-        # Connect signals - use clicked (only fires on user interaction, not setChecked)
         self.forward_radio.clicked.connect(lambda: self._on_user_direction_click(1))
         self.reverse_radio.clicked.connect(lambda: self._on_user_direction_click(-1))
-
-        self.test_minus_10.clicked.connect(lambda: self.test_movement.emit(self.joint_name, -10))
-        self.test_minus_1.clicked.connect(lambda: self.test_movement.emit(self.joint_name, -1))
-        self.test_plus_1.clicked.connect(lambda: self.test_movement.emit(self.joint_name, 1))
-        self.test_plus_10.clicked.connect(lambda: self.test_movement.emit(self.joint_name, 10))
 
     def _on_user_direction_click(self, direction):
         """Called when user clicks a direction radio button"""
@@ -193,10 +235,6 @@ class GripperCalibrationWidget(QtWidgets.QWidget):
 
     def setup_ui(self):
         main_layout = QtWidgets.QVBoxLayout(self)
-
-        header = QtWidgets.QLabel("<b>Gripper Calibration</b>")
-        header.setStyleSheet("font-size: 14px;")
-        main_layout.addWidget(header)
 
         desc = QtWidgets.QLabel(
             "Drag the slider to move the gripper, then capture the open and closed positions."
@@ -326,11 +364,6 @@ class DHParametersWidget(QtWidgets.QWidget):
         """Create UI elements for DH parameters"""
         main_layout = QtWidgets.QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
-
-        # Header
-        header_label = QtWidgets.QLabel("<b>DH Parameters</b>")
-        header_label.setStyleSheet("font-size: 14px;")
-        main_layout.addWidget(header_label)
 
         # Create table
         self.table = QtWidgets.QTableWidget()
@@ -540,10 +573,6 @@ class HomePositionWidget(QtWidgets.QWidget):
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        header = QtWidgets.QLabel("<b>Home Position</b>")
-        header.setStyleSheet("font-size: 14px;")
-        layout.addWidget(header)
-
         desc = QtWidgets.QLabel(
             "Joint angles the robot moves to when the Home button is pressed."
         )
@@ -668,10 +697,6 @@ class ParkPositionWidget(QtWidgets.QWidget):
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        header = QtWidgets.QLabel("<b>Park Position</b>")
-        header.setStyleSheet("font-size: 14px;")
-        layout.addWidget(header)
-
         desc = QtWidgets.QLabel(
             "Position the robot moves to before shutdown. "
             "Gripper closes and motors disable after arrival."
@@ -789,7 +814,7 @@ class CalibrationPanel(QtWidgets.QWidget):
         header = QtWidgets.QLabel("<h2>Robot Calibration</h2>")
         main_layout.addWidget(header)
 
-        # Scroll area for joint widgets
+        # Scroll area
         scroll = QtWidgets.QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
@@ -797,75 +822,65 @@ class CalibrationPanel(QtWidgets.QWidget):
         scroll_content = QtWidgets.QWidget()
         scroll_layout = QtWidgets.QVBoxLayout(scroll_content)
 
-        # Motor direction instructions (inside scroll area, above joint widgets)
+        # --- Joint Calibration ---
+        joint_section = CollapsibleSection("Joint Calibration", is_expanded=True)
+
         instructions = QtWidgets.QLabel(
-            "<b>Verify motor directions match visualization:</b><br>"
-            "1. Click +10° for each joint<br>"
-            "2. If physical robot moves opposite to visualization, toggle 'Reverse'<br>"
-            "3. Save when all joints are correct"
+            "Click +10\u00b0 to test each joint. If the robot moves opposite "
+            "to the visualization, toggle to Rev."
         )
         instructions.setWordWrap(True)
-        instructions.setStyleSheet("background-color: #ffffcc; padding: 8px; border: 1px solid #cccc00;")
-        scroll_layout.addWidget(instructions)
+        instructions.setStyleSheet("color: #666; margin-bottom: 4px;")
+        joint_section.add_widget(instructions)
 
-        # Create joint calibration widgets
         joint_info = [
-            ('Art1', 'Base rotation (X axis)'),
-            ('Art2', 'Shoulder pitch (Y axis)'),
-            ('Art3', 'Elbow pitch (Z axis)'),
-            ('Art4', 'Wrist roll (U axis)'),
-            ('Art5', 'Wrist pitch (V+W differential)'),
-            ('Art6', 'Wrist yaw (V-W differential)')
+            ('Art1', 'Base rotation'),
+            ('Art2', 'Shoulder pitch'),
+            ('Art3', 'Elbow pitch'),
+            ('Art4', 'Wrist roll'),
+            ('Art5', 'Wrist pitch'),
+            ('Art6', 'Wrist yaw')
         ]
-
         for joint_name, description in joint_info:
             widget = JointCalibrationWidget(joint_name, description)
             widget.test_movement.connect(self.on_test_movement)
             widget.direction_changed.connect(self.on_joint_direction_changed)
             self.joint_widgets[joint_name] = widget
-            scroll_layout.addWidget(widget)
+            joint_section.add_widget(widget)
 
-        # Add separator
-        separator = QtWidgets.QFrame()
-        separator.setFrameShape(QtWidgets.QFrame.HLine)
-        separator.setStyleSheet("background-color: #ccc; margin: 10px 0;")
-        scroll_layout.addWidget(separator)
+        scroll_layout.addWidget(joint_section)
 
-        # Add gripper calibration widget
+        # --- Gripper Calibration ---
+        gripper_section = CollapsibleSection("Gripper Calibration", is_expanded=False)
         self.gripper_calibration = GripperCalibrationWidget()
         self.gripper_calibration.test_gripper.connect(self.on_test_gripper)
         self.gripper_calibration.limits_changed.connect(self._auto_save_gripper)
-        scroll_layout.addWidget(self.gripper_calibration)
+        gripper_section.add_widget(self.gripper_calibration)
+        scroll_layout.addWidget(gripper_section)
 
-        # Add separator before home position
-        separator2 = QtWidgets.QFrame()
-        separator2.setFrameShape(QtWidgets.QFrame.HLine)
-        separator2.setStyleSheet("background-color: #ccc; margin: 10px 0;")
-        scroll_layout.addWidget(separator2)
-
-        # Add home position widget
+        # --- Home Position ---
+        home_section = CollapsibleSection("Home Position", is_expanded=False)
         self.home_position = HomePositionWidget()
-        scroll_layout.addWidget(self.home_position)
+        home_section.add_widget(self.home_position)
+        scroll_layout.addWidget(home_section)
 
-        # Add separator before park position
-        separator3 = QtWidgets.QFrame()
-        separator3.setFrameShape(QtWidgets.QFrame.HLine)
-        separator3.setStyleSheet("background-color: #ccc; margin: 10px 0;")
-        scroll_layout.addWidget(separator3)
-
-        # Add park position widget
+        # --- Park Position ---
+        park_section = CollapsibleSection("Park Position", is_expanded=False)
         self.park_position = ParkPositionWidget()
-        scroll_layout.addWidget(self.park_position)
+        park_section.add_widget(self.park_position)
+        scroll_layout.addWidget(park_section)
 
-        # Add separator before DH parameters
-        separator4 = QtWidgets.QFrame()
-        separator4.setFrameShape(QtWidgets.QFrame.HLine)
-        separator4.setStyleSheet("background-color: #ccc; margin: 10px 0;")
-        scroll_layout.addWidget(separator4)
-
-        # Add DH parameters widget (advanced, rarely changed)
+        # --- DH Parameters ---
+        dh_section = CollapsibleSection("DH Parameters", is_expanded=False)
         self.dh_parameters = DHParametersWidget()
-        scroll_layout.addWidget(self.dh_parameters)
+        dh_section.add_widget(self.dh_parameters)
+        scroll_layout.addWidget(dh_section)
+
+        # Accordion: expanding one section collapses the others
+        self._sections = [joint_section, gripper_section, home_section,
+                          park_section, dh_section]
+        for section in self._sections:
+            section.expanded.connect(self._on_section_expanded)
 
         scroll_layout.addStretch()
         scroll.setWidget(scroll_content)
@@ -884,6 +899,12 @@ class CalibrationPanel(QtWidgets.QWidget):
         self.status_label = QtWidgets.QLabel("Status: Ready to calibrate")
         self.status_label.setStyleSheet("background-color: #e0e0e0; padding: 5px;")
         main_layout.addWidget(self.status_label)
+
+    def _on_section_expanded(self, opened_section):
+        """Accordion: collapse every section except the one just opened."""
+        for section in self._sections:
+            if section is not opened_section:
+                section.collapse()
 
     def on_test_movement(self, joint_name, delta_angle):
         """Handle test movement button clicks"""

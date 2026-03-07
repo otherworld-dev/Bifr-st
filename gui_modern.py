@@ -381,8 +381,8 @@ class AxisRow(QFrame):
             # Cartesian mode: "X (mm)" or "Roll (°)"
             label_text = f"{joint_name} ({axis_label})"
         else:
-            # Joint mode: "J1 (X)"
-            label_text = f"{joint_name} ({axis_label})"
+            # Joint mode: "A1", "A2", etc.
+            label_text = joint_name
         self.label = QLabel(label_text)
         self.label.setStyleSheet("font-size: 8pt; font-weight: bold;")
         top_row.addWidget(self.label)
@@ -801,8 +801,8 @@ class AxisControlColumn(QFrame):
         """Create axis rows for joint control mode (J1-J6)"""
         self._clear_rows()
         joint_data = [
-            ("J1", "X"), ("J2", "Y"), ("J3", "Z"),
-            ("J4", "U"), ("J5", "V"), ("J6", "W")
+            ("A1", "X"), ("A2", "Y"), ("A3", "Z"),
+            ("A4", "U"), ("A5", "V"), ("A6", "W")
         ]
         for joint_name, axis_label in joint_data:
             row = AxisRow(joint_name, axis_label, is_gripper=False)
@@ -1012,14 +1012,11 @@ class JointStatusTable(QTableWidget):
         self.setMinimumHeight(205)
         self.setMaximumHeight(225)
 
-        # Populate rows (J1-J6 only, no gripper)
-        joint_names = ["J1", "J2", "J3", "J4", "J5", "J6"]
-        axis_labels = ["X", "Y", "Z", "U", "V", "W"]  # Corresponding axes
+        # Populate rows (A1-A6 only, no gripper)
+        joint_names = ["A1", "A2", "A3", "A4", "A5", "A6"]
 
         for row, joint_name in enumerate(joint_names):
-            # Joint name with axis label
-            display_name = f"{joint_name} ({axis_labels[row]})"
-            name_item = QTableWidgetItem(display_name)
+            name_item = QTableWidgetItem(joint_name)
             name_item.setTextAlignment(Qt.AlignCenter)
             name_font = QtGui.QFont()
             name_font.setBold(True)
@@ -1393,7 +1390,7 @@ class ControlModePanel(QFrame):
             row, col_base = divmod(i, 2)
             col_offset = col_base * 3
 
-            lbl = QLabel(f"J{i+1}")
+            lbl = QLabel(f"A{i+1}")
             lbl.setStyleSheet(
                 "font-weight: bold; font-size: 11pt; color: #4a86c8; min-width: 22px;")
             lbl.setAlignment(Qt.AlignCenter)
@@ -1461,15 +1458,15 @@ class ControlModePanel(QFrame):
             widget.setStyleSheet(ik_out_style)
 
         for col, (lbl_text, widget) in enumerate([
-            ("J1", self.IkOutputValueX), ("J2", self.IkOutputValueY),
-            ("J3", self.IkOutputValueZ)]):
+            ("A1", self.IkOutputValueX), ("A2", self.IkOutputValueY),
+            ("A3", self.IkOutputValueZ)]):
             lbl = QLabel(lbl_text)
             lbl.setStyleSheet(ik_lbl_style)
             output_grid.addWidget(lbl, 0, col * 2)
             output_grid.addWidget(widget, 0, col * 2 + 1)
         for col, (lbl_text, widget) in enumerate([
-            ("J4", self.IkOutputValueA), ("J5", self.IkOutputValueB),
-            ("J6", self.IkOutputValueC)]):
+            ("A4", self.IkOutputValueA), ("A5", self.IkOutputValueB),
+            ("A6", self.IkOutputValueC)]):
             lbl = QLabel(lbl_text)
             lbl.setStyleSheet(ik_lbl_style)
             output_grid.addWidget(lbl, 1, col * 2)
@@ -2043,28 +2040,28 @@ class Ui_MainWindow:
         self.SpinBoxGripper.setVisible(False)
 
         # Actual position labels - use the value_label from axis rows
-        self.FKCurrentPosValueArt1 = axis_column.rows["J1"].value_label
-        self.FKCurrentPosValueArt2 = axis_column.rows["J2"].value_label
-        self.FKCurrentPosValueArt3 = axis_column.rows["J3"].value_label
-        self.FKCurrentPosValueArt4 = axis_column.rows["J4"].value_label
-        self.FKCurrentPosValueArt5 = axis_column.rows["J5"].value_label
-        self.FKCurrentPosValueArt6 = axis_column.rows["J6"].value_label
+        self.FKCurrentPosValueArt1 = axis_column.rows["A1"].value_label
+        self.FKCurrentPosValueArt2 = axis_column.rows["A2"].value_label
+        self.FKCurrentPosValueArt3 = axis_column.rows["A3"].value_label
+        self.FKCurrentPosValueArt4 = axis_column.rows["A4"].value_label
+        self.FKCurrentPosValueArt5 = axis_column.rows["A5"].value_label
+        self.FKCurrentPosValueArt6 = axis_column.rows["A6"].value_label
 
         # Endstop indicators - use the endstop_indicator from axis rows
-        self.endstopLabelArt1 = axis_column.rows["J1"].endstop_indicator
-        self.endstopLabelArt2 = axis_column.rows["J2"].endstop_indicator
-        self.endstopLabelArt3 = axis_column.rows["J3"].endstop_indicator
-        self.endstopLabelArt4 = axis_column.rows["J4"].endstop_indicator
-        self.endstopLabelArt5 = axis_column.rows["J5"].endstop_indicator
-        self.endstopLabelArt6 = axis_column.rows["J6"].endstop_indicator
+        self.endstopLabelArt1 = axis_column.rows["A1"].endstop_indicator
+        self.endstopLabelArt2 = axis_column.rows["A2"].endstop_indicator
+        self.endstopLabelArt3 = axis_column.rows["A3"].endstop_indicator
+        self.endstopLabelArt4 = axis_column.rows["A4"].endstop_indicator
+        self.endstopLabelArt5 = axis_column.rows["A5"].endstop_indicator
+        self.endstopLabelArt6 = axis_column.rows["A6"].endstop_indicator
 
         # Store axis column reference for step-aware button connections
         self.axis_column = axis_column
 
         # Map +/- buttons from axis rows to bifrost expected names
         # The step size is controlled by the axis_column.current_step toggle
-        joint_mapping = [("J1", "Art1"), ("J2", "Art2"), ("J3", "Art3"),
-                         ("J4", "Art4"), ("J5", "Art5"), ("J6", "Art6")]
+        joint_mapping = [("A1", "Art1"), ("A2", "Art2"), ("A3", "Art3"),
+                         ("A4", "Art4"), ("A5", "Art5"), ("A6", "Art6")]
         for axis_name, joint_name in joint_mapping:
             row = axis_column.rows[axis_name]
             # Store the +/- buttons - they will use variable step from toggle

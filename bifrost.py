@@ -1017,8 +1017,8 @@ class BifrostGUI(Ui_MainWindow):
 
         if mode == "joint":
             # Joint mode: J1-J6 control individual joints
-            joint_mapping = [("J1", "Art1"), ("J2", "Art2"), ("J3", "Art3"),
-                             ("J4", "Art4"), ("J5", "Art5"), ("J6", "Art6")]
+            joint_mapping = [("A1", "Art1"), ("A2", "Art2"), ("A3", "Art3"),
+                             ("A4", "Art4"), ("A5", "Art5"), ("A6", "Art6")]
             for axis_name, joint_name in joint_mapping:
                 if axis_name in self.axis_column.rows:
                     row = self.axis_column.rows[axis_name]
@@ -1939,14 +1939,21 @@ class BifrostGUI(Ui_MainWindow):
             self.SpinBoxArt6.value()
         ]
 
+        # Record to position history so trajectory visualization works in simulation
+        if hasattr(self, 'position_history') and self.position_history is not None:
+            self.position_history.add_snapshot(
+                art1=joint_angles[0], art2=joint_angles[1], art3=joint_angles[2],
+                art4=joint_angles[3], art5=joint_angles[4], art6=joint_angles[5]
+            )
+
         # Update 3D visualization
         if hasattr(self, 'position_canvas') and self.position_canvas:
             self.position_canvas.update_robot(joint_angles)
 
         # Update axis column value labels so the sidebar reflects current positions
         if hasattr(self, 'axis_column'):
-            joint_mapping = [("J1", 0), ("J2", 1), ("J3", 2),
-                             ("J4", 3), ("J5", 4), ("J6", 5)]
+            joint_mapping = [("A1", 0), ("A2", 1), ("A3", 2),
+                             ("A4", 3), ("A5", 4), ("A6", 5)]
             for axis_name, idx in joint_mapping:
                 if axis_name in self.axis_column.rows:
                     self.axis_column.rows[axis_name].set_value(joint_angles[idx])
@@ -2220,8 +2227,8 @@ class BifrostGUI(Ui_MainWindow):
 
         # Update axis column rows (dynamically looked up to survive mode switches)
         if hasattr(self, 'axis_column'):
-            joint_mapping = [("J1", 0), ("J2", 1), ("J3", 2),
-                             ("J4", 3), ("J5", 4), ("J6", 5)]
+            joint_mapping = [("A1", 0), ("A2", 1), ("A3", 2),
+                             ("A4", 3), ("A5", 4), ("A6", 5)]
             for axis_name, idx in joint_mapping:
                 if axis_name in self.axis_column.rows:
                     self.axis_column.rows[axis_name].set_value(joint_angles[idx])
@@ -2245,8 +2252,8 @@ class BifrostGUI(Ui_MainWindow):
 
         # Map firmware axis letter to joint row name
         axis_to_row = {
-            'X': 'J1', 'Y': 'J2', 'Z': 'J3',
-            'U': 'J4', 'V': 'J5', 'W': 'J6'
+            'X': 'A1', 'Y': 'A2', 'Z': 'A3',
+            'U': 'A4', 'V': 'A5', 'W': 'A6'
         }
         row_name = axis_to_row.get(axis)
         if not row_name or row_name not in self.axis_column.rows:
@@ -2264,16 +2271,48 @@ class BifrostGUI(Ui_MainWindow):
         """Callback when a point is added to the sequence - updates both panels"""
         self.sequencePointsList.addItem(point_text)
         self.ctrlSequencePointsList.addItem(point_text)
+        self._updateSequencePreview()
 
     def _onSequenceCleared(self):
         """Callback when sequence is cleared - updates both panels"""
         self.sequencePointsList.clear()
         self.ctrlSequencePointsList.clear()
+        self._updateSequencePreview()
 
     def _onSequencePointRemoved(self, index):
         """Callback when a point is removed from sequence - updates both panels"""
         self.sequencePointsList.takeItem(index)
         self.ctrlSequencePointsList.takeItem(index)
+        self._updateSequencePreview()
+
+    def _updateSequencePreview(self):
+        """Recompute and display sequence trajectory preview on the 3D visualizer.
+        Debounced: defers computation by 100ms so bulk updates (e.g. load) don't
+        recompute FK for every point individually."""
+        if not hasattr(self, '_seq_preview_timer'):
+            self._seq_preview_timer = QtCore.QTimer()
+            self._seq_preview_timer.setSingleShot(True)
+            self._seq_preview_timer.timeout.connect(self._doUpdateSequencePreview)
+        self._seq_preview_timer.start(100)
+
+    def _doUpdateSequencePreview(self):
+        """Actually compute and set the sequence preview trajectory."""
+        canvas = getattr(self, 'position_canvas', None)
+        if canvas is None:
+            return
+
+        seq = self.sequence_controller.current_sequence
+        if len(seq) < 2:
+            canvas.set_sequence_preview(None)
+            return
+
+        from position_history import compute_trajectory_from_waypoints
+        waypoints = [
+            (p.q1, p.q2, p.q3, p.q4, p.q5, p.q6)
+            for p in seq.points
+        ]
+        tcp_points = compute_trajectory_from_waypoints(waypoints)
+        canvas.set_sequence_preview(tcp_points)
 
     def _onSequenceButtonStateChanged(self, button_name, enabled):
         """Callback to update sequence button states on both panels"""

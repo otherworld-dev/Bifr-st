@@ -14,6 +14,132 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+# Joint names in order for interpolation
+_JOINT_NAMES = ('art1', 'art2', 'art3', 'art4', 'art5', 'art6')
+
+# Minimum total joint change (degrees) to warrant interpolation between two snapshots
+_MIN_JOINT_CHANGE_FOR_INTERP = 1.0
+
+
+def _interpolate_tcp_trajectory(snapshots) -> list:
+    """
+    Build a dense TCP trajectory by linearly interpolating joint angles
+    between consecutive snapshots and computing FK at each subdivision.
+
+    This produces the actual curved TCP path for joint-space (G0) moves.
+    Segments where joints barely moved are not subdivided.
+
+    Args:
+        snapshots: List of PositionSnapshot objects (len >= 2)
+
+    Returns:
+        List of (x, y, z, timestamp) tuples
+    """
+    try:
+        import forward_kinematics as fk
+        import config
+    except ImportError:
+        # Fallback: no interpolation if FK unavailable
+        trajectory = []
+        for s in snapshots:
+            tcp = s.compute_tcp_position()
+            if tcp:
+                trajectory.append((*tcp, s.timestamp))
+        return trajectory
+
+    n_steps = getattr(config, 'TRAJECTORY_INTERPOLATION_STEPS', 20)
+    trajectory = []
+
+    # Get joint angles for first snapshot and add its TCP
+    prev_joints = np.array([snapshots[0].get(j, 0.0) for j in _JOINT_NAMES])
+    tcp = fk.compute_tcp_position_only(*prev_joints)
+    if tcp:
+        trajectory.append((*tcp, snapshots[0].timestamp))
+
+    for i in range(1, len(snapshots)):
+        curr_joints = np.array([snapshots[i].get(j, 0.0) for j in _JOINT_NAMES])
+        t0 = snapshots[i - 1].timestamp
+        t1 = snapshots[i].timestamp
+
+        # Check if joints moved enough to warrant interpolation
+        delta = np.abs(curr_joints - prev_joints).sum()
+        if delta < _MIN_JOINT_CHANGE_FOR_INTERP:
+            # Stationary or near-stationary — just add the endpoint
+            tcp = fk.compute_tcp_position_only(*curr_joints)
+            if tcp:
+                trajectory.append((*tcp, t1))
+        else:
+            # Interpolate: skip t=0 (already added as previous endpoint)
+            for step in range(1, n_steps + 1):
+                alpha = step / n_steps
+                interp_joints = prev_joints + alpha * (curr_joints - prev_joints)
+                interp_time = t0 + alpha * (t1 - t0)
+                tcp = fk.compute_tcp_position_only(*interp_joints)
+                if tcp:
+                    trajectory.append((*tcp, interp_time))
+
+        prev_joints = curr_joints
+
+    return trajectory
+
+
+def compute_trajectory_from_waypoints(waypoints) -> list:
+    """
+    Compute a dense TCP trajectory from a list of joint-angle waypoints.
+
+    Linearly interpolates joint angles between consecutive waypoints and
+    computes FK at each subdivision, producing the actual curved TCP path.
+
+    Args:
+        waypoints: List of (q1, q2, q3, q4, q5, q6) tuples (degrees)
+
+    Returns:
+        List of (x, y, z) tuples representing the dense TCP path
+    """
+    if len(waypoints) < 2:
+        if len(waypoints) == 1:
+            try:
+                import forward_kinematics as fk
+                tcp = fk.compute_tcp_position_only(*waypoints[0])
+                return [tcp] if tcp else []
+            except ImportError:
+                return []
+        return []
+
+    try:
+        import forward_kinematics as fk
+        import config
+    except ImportError:
+        return []
+
+    n_steps = getattr(config, 'TRAJECTORY_INTERPOLATION_STEPS', 20)
+    trajectory = []
+
+    prev = np.array(waypoints[0], dtype=float)
+    tcp = fk.compute_tcp_position_only(*prev)
+    if tcp:
+        trajectory.append(tcp)
+
+    for i in range(1, len(waypoints)):
+        curr = np.array(waypoints[i], dtype=float)
+        delta = np.abs(curr - prev).sum()
+
+        if delta < _MIN_JOINT_CHANGE_FOR_INTERP:
+            tcp = fk.compute_tcp_position_only(*curr)
+            if tcp:
+                trajectory.append(tcp)
+        else:
+            for step in range(1, n_steps + 1):
+                alpha = step / n_steps
+                interp = prev + alpha * (curr - prev)
+                tcp = fk.compute_tcp_position_only(*interp)
+                if tcp:
+                    trajectory.append(tcp)
+
+        prev = curr
+
+    return trajectory
+
 
 class PositionSnapshot:
     """
@@ -232,12 +358,17 @@ class PositionHistory:
         latest_snapshot = self.history[-1]
         return latest_snapshot.positions.copy()
 
-    def get_tcp_trajectory(self, window_seconds=60):
+    def get_tcp_trajectory(self, window_seconds=60, interpolate=True):
         """
-        Get TCP trajectory for the specified time window
+        Get TCP trajectory for the specified time window.
+
+        When interpolate=True, linearly interpolates joint angles between
+        consecutive snapshots and computes FK at each subdivision to produce
+        the actual curved TCP path (accurate for joint-space G0 moves).
 
         Args:
             window_seconds: Time window in seconds (0 = all history)
+            interpolate: If True, subdivide segments via joint interpolation + FK
 
         Returns:
             List of tuples [(x, y, z, timestamp), ...] representing TCP positions
@@ -253,15 +384,17 @@ class PositionHistory:
         else:
             snapshots = list(self.history)
 
-        # Compute TCP positions
-        trajectory = []
-        for snapshot in snapshots:
-            tcp_pos = snapshot.compute_tcp_position()
-            if tcp_pos is not None:
-                x, y, z = tcp_pos
-                trajectory.append((x, y, z, snapshot.timestamp))
+        if not interpolate or len(snapshots) < 2:
+            # Original behaviour: one FK per snapshot
+            trajectory = []
+            for snapshot in snapshots:
+                tcp_pos = snapshot.compute_tcp_position()
+                if tcp_pos is not None:
+                    x, y, z = tcp_pos
+                    trajectory.append((x, y, z, snapshot.timestamp))
+            return trajectory
 
-        return trajectory
+        return _interpolate_tcp_trajectory(snapshots)
 
     def get_statistics(self, joint_name):
         """
