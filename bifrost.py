@@ -229,8 +229,6 @@ class BifrostGUI(Ui_MainWindow):
         self.is_homing = False
         self.sync_commands_pending = False
 
-        # Track jog mode state
-        self.jog_mode_enabled = True
 
         # Initialise command sender (will use ConsoleOutput widget)
         self.command_sender = SerialCommandSender(s0, None)  # Console widget set later after full init
@@ -270,9 +268,6 @@ class BifrostGUI(Ui_MainWindow):
         # Movement type now controlled by axis column - connect its signal
         if hasattr(self, 'axis_column'):
             self.axis_column.movement_type_changed.connect(self._onMovementTypeChanged)
-
-        self.JogModeCheckBox.toggled.connect(self.toggleJogMode)
-        self.JogModeCheckBox.setChecked(True)  # Enable jog mode by default
 
         # Dynamic FK control connections (80% code reduction via loops)
         # Replace 54 individual signal connections with generic handlers
@@ -424,10 +419,6 @@ class BifrostGUI(Ui_MainWindow):
             get_movement_params_callback=lambda: CommandBuilder.get_movement_params(self),
             no_connection_callback=self.noSerialConnection
         )
-
-        # Sync jog mode state with controllers (setChecked(True) fires before controllers exist)
-        self.ik_controller.set_jog_mode(self.jog_mode_enabled)
-        self.fk_controller.set_jog_mode(self.jog_mode_enabled)
 
         # Initialise Gripper Controller with callbacks
         self.gripper_controller = GripperController(
@@ -646,14 +637,11 @@ class BifrostGUI(Ui_MainWindow):
             else:
                 spinbox.setValue(new_value)
 
-            # JOG MODE: If jog mode is enabled, execute movement immediately
-            if self.jog_mode_enabled:
-                if joint_name == 'Gripper':
-                    self.MoveGripper()
-                    logger.debug(f"[JOG MODE] Gripper moved to {new_value}%")
-                else:
-                    self.FKMoveJoint(joint_name)
-                    logger.debug(f"[JOG MODE] {joint_name} jogged to {new_value}°")
+            # Execute movement immediately
+            if joint_name == 'Gripper':
+                self.MoveGripper()
+            else:
+                self.FKMoveJoint(joint_name)
         else:
             logger.warning(f"Unknown joint name: {joint_name}")
 
@@ -820,73 +808,6 @@ class BifrostGUI(Ui_MainWindow):
     def _onMovementTypeChanged(self, move_type):
         """Handle movement type change from axis column (G0/G1)"""
         logger.debug(f"Movement type changed to: {move_type}")
-
-    def toggleJogMode(self, enabled):
-        """
-        Enable/disable jog mode with confirmation and visual feedback
-
-        Args:
-            enabled: True to enable jog mode, False to disable
-        """
-        # If enabling, show confirmation warning
-        if enabled and config.JOG_MODE_WARNING_ENABLED:
-            if not self._showJogModeWarning():
-                # User cancelled, uncheck the checkbox
-                self.JogModeCheckBox.setChecked(False)
-                return
-
-        # Update state
-        self.jog_mode_enabled = enabled
-
-        # Sync with IK controller (guarded - may not exist during init)
-        if hasattr(self, 'ik_controller'):
-            self.ik_controller.set_jog_mode(enabled)
-
-        # Sync with FK controller (guarded - may not exist during init)
-        if hasattr(self, 'fk_controller'):
-            self.fk_controller.set_jog_mode(enabled)
-
-        # Update visual feedback (guarded - may not exist during init)
-        if hasattr(self, 'ui_state_manager'):
-            self._updateJogModeVisuals(enabled)
-
-        # Log state change
-        if enabled:
-            logger.warning("JOG MODE ENABLED - Inc/Dec buttons will execute movements immediately!")
-        else:
-            logger.info("Jog mode disabled - Normal operation resumed")
-
-    def _showJogModeWarning(self):
-        """
-        Show confirmation dialog when enabling jog mode
-
-        Returns:
-            True if user confirmed, False if cancelled
-        """
-        msgBox = QtWidgets.QMessageBox()
-        msgBox.setIcon(QtWidgets.QMessageBox.Warning)
-        msgBox.setWindowTitle("Enable Jog Mode")
-        msgBox.setText("⚠ Enable Jog Mode?\n\n"
-                      "When Jog Mode is active:\n"
-                      "• Inc/Dec buttons will IMMEDIATELY execute movements\n"
-                      "• No need to click 'Go' buttons\n"
-                      "• Works for all FK joints (Art1-6, Gripper) and IK controls\n"
-                      "• Uses current G0/G1 and feedrate settings\n\n"
-                      "Make sure the robot workspace is clear before proceeding.")
-        msgBox.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
-        msgBox.setDefaultButton(QtWidgets.QMessageBox.No)
-
-        result = msgBox.exec_()
-        return result == QtWidgets.QMessageBox.Yes
-
-    def _updateJogModeVisuals(self, enabled):
-        """
-        Update visual feedback for jog mode state - delegates to UIStateManager
-
-        Args:
-            enabled: True if jog mode is enabled, False otherwise
-        """
-        self.ui_state_manager.update_jog_mode(enabled)
 
 
 # OLD FK methods removed - replaced with generic handlers above
@@ -1127,27 +1048,13 @@ class BifrostGUI(Ui_MainWindow):
             logger.warning(f"Unknown Cartesian axis: {axis}")
             return
 
-        if self.jog_mode_enabled:
-            # Jacobian-based jog: compute joint delta directly
-            cartesian_delta = [0.0] * 6
-            if axis_idx < 3:
-                cartesian_delta[axis_idx] = delta  # mm
-            else:
-                cartesian_delta[axis_idx] = np.radians(delta)  # degrees → radians
-            self._executeJacobianJog(cartesian_delta)
+        # Jacobian-based jog: compute joint delta directly
+        cartesian_delta = [0.0] * 6
+        if axis_idx < 3:
+            cartesian_delta[axis_idx] = delta  # mm
         else:
-            # Non-jog: update spinbox for display (IK recalculates via debounce timer)
-            if axis in ['X', 'Y', 'Z']:
-                spinbox = getattr(self, f'IKInputSpinBox{axis}', None)
-                if spinbox:
-                    spinbox.setValue(spinbox.value() + delta)
-            else:
-                axis_to_spinbox = {'Roll': 'A', 'Pitch': 'B', 'Yaw': 'C'}
-                spinbox_letter = axis_to_spinbox.get(axis)
-                if spinbox_letter:
-                    spinbox = getattr(self, f'IKInputSpinBox{spinbox_letter}', None)
-                    if spinbox:
-                        spinbox.setValue(spinbox.value() + delta)
+            cartesian_delta[axis_idx] = np.radians(delta)  # degrees → radians
+        self._executeJacobianJog(cartesian_delta)
 
 # Inverse Kinematics Functions
     def _calculateIKDeferred(self):
@@ -1182,17 +1089,12 @@ class BifrostGUI(Ui_MainWindow):
             axis: Axis letter ('X', 'Y', 'Z')
             delta: Amount to add to current value (mm)
         """
-        if self.jog_mode_enabled:
-            # Jacobian-based jog: compute joint delta directly
-            axis_map = {'X': 0, 'Y': 1, 'Z': 2}
-            axis_idx = axis_map.get(axis, 0)
-            cartesian_delta = [0.0] * 6
-            cartesian_delta[axis_idx] = delta  # mm
-            self._executeJacobianJog(cartesian_delta)
-        else:
-            # Non-jog: update spinbox for display (IK recalculates via debounce timer)
-            spinbox = getattr(self, f'IKInputSpinBox{axis}')
-            spinbox.setValue(spinbox.value() + delta)
+        # Jacobian-based jog: compute joint delta directly
+        axis_map = {'X': 0, 'Y': 1, 'Z': 2}
+        axis_idx = axis_map.get(axis, 0)
+        cartesian_delta = [0.0] * 6
+        cartesian_delta[axis_idx] = delta  # mm
+        self._executeJacobianJog(cartesian_delta)
 
     def _executeJacobianJog(self, cartesian_delta):
         """
@@ -2344,17 +2246,7 @@ class BifrostGUI(Ui_MainWindow):
         self.IkOutputValueZ.setText(z_text)
 
     def _onIKSpinboxUpdate(self, joint_values):
-        """Callback to update FK spinboxes from IK solution.
-
-        Only updates FK spinboxes in jog mode (where the move will be executed
-        immediately). In non-jog mode, the IK result is display-only via the
-        output labels — FK spinboxes must reflect the actual robot position to
-        prevent jumps when switching to Jacobian jog.
-        """
-        if not self.jog_mode_enabled:
-            # Non-jog: don't touch FK spinboxes, IK result shown in output labels only
-            return
-
+        """Callback to update FK spinboxes from IK solution."""
         self.SpinBoxArt1.setValue(joint_values['Art1'])
         self.SpinBoxArt2.setValue(joint_values['Art2'])
         self.SpinBoxArt3.setValue(joint_values['Art3'])

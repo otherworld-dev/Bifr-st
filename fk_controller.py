@@ -103,7 +103,7 @@ class FKController:
         self.no_connection_callback = no_connection_callback
 
         # Jog mode state (synced from main controller)
-        self.jog_mode_enabled = False
+        self.jog_mode_enabled = True
 
         # Current joint values (for calculations)
         self._current_values = JointValues()

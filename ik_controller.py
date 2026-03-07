@@ -92,7 +92,7 @@ class IKController:
         self.frame_manager = frame_manager
 
         # State
-        self.jog_mode_enabled = False
+        self.jog_mode_enabled = True
         self.last_solution: Optional[IKSolutionResult] = None
         self.current_target = IKTarget()
 

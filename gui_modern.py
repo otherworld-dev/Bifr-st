@@ -738,7 +738,7 @@ class AxisControlColumn(QFrame):
         quick_layout.addWidget(quick_heading)
 
         # Home button
-        self.HomeButton = QPushButton("🏠 Master")
+        self.HomeButton = QPushButton("Master")
         self.HomeButton.setFixedHeight(24)
         self.HomeButton.setStyleSheet("""
             QPushButton {
@@ -788,12 +788,6 @@ class AxisControlColumn(QFrame):
         self.ParkButton.setToolTip("Park robot, close gripper, disable motors")
         quick_layout.addWidget(self.ParkButton)
 
-        # Jog mode checkbox
-        self.jog_mode_checkbox = QCheckBox("Jog Mode")
-        self.jog_mode_checkbox.setStyleSheet("font-size: 7pt;")
-        self.jog_mode_checkbox.setToolTip("Enable immediate movement on +/- buttons")
-        self.jog_mode_checkbox.setChecked(True)  # Default enabled
-        quick_layout.addWidget(self.jog_mode_checkbox)
 
         layout.addWidget(quick_frame)
 
@@ -2148,10 +2142,7 @@ class Ui_MainWindow:
         self.FeedRateLabel = QLabel("F:", MainWindow)  # Dummy label
         self.FeedRateLabel.setVisible(False)
 
-        # Jog mode checkbox - create in axis column
-        self.JogModeCheckBox = axis_column.jog_mode_checkbox
-
-        # Execute button - not needed since jog mode auto-executes
+        # Execute button - not needed since jog bar always jogs
         self.ExecuteMovementButton = QPushButton("Go", MainWindow)
         self.ExecuteMovementButton.setVisible(False)
 

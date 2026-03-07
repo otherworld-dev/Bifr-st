@@ -74,7 +74,7 @@ class GripperController:
         self._current_position = 0.0
 
         # Jog mode state (synced from main controller)
-        self.jog_mode_enabled = False
+        self.jog_mode_enabled = True
 
     @property
     def current_position(self) -> float:
