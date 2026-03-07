@@ -14,13 +14,13 @@ from typing import Optional, Callable, List
 from PyQt5.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QPushButton, QComboBox, QLineEdit,
-    QDoubleSpinBox, QGroupBox, QTableWidget, QTableWidgetItem,
-    QHeaderView, QMessageBox, QWidget, QStackedWidget,
-    QProgressBar, QTextEdit
+    QDoubleSpinBox, QTableWidget, QTableWidgetItem,
+    QHeaderView, QMessageBox, QWidget, QScrollArea
 )
 from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5 import QtGui
 
+from calibration_panel import CollapsibleSection
 from frame_controller import FrameController
 from frame_teaching import TeachingProgress, TeachingState
 
@@ -128,22 +128,35 @@ class FrameManagementPanel(QFrame):
         main_layout.setSpacing(10)
 
         # Title
-        title = QLabel("Coordinate Frame Management")
+        title = QLabel("Coordinate Frames")
         title_font = QtGui.QFont()
         title_font.setPointSize(14)
         title_font.setBold(True)
         title.setFont(title_font)
         main_layout.addWidget(title)
 
-        # Frame selection
-        selection_group = QGroupBox("Active Frame Selection")
-        selection_layout = QHBoxLayout(selection_group)
+        # Panel description
+        desc = QLabel(
+            "Define coordinate frames for your workpieces and tools. "
+            "The working frame determines how Cartesian jog commands are interpreted."
+        )
+        desc.setWordWrap(True)
+        desc.setStyleSheet("color: #666; margin-bottom: 4px;")
+        main_layout.addWidget(desc)
+
+        # --- Active Selection (always visible) ---
+        selection_frame = QFrame()
+        selection_frame.setFrameShape(QFrame.StyledPanel)
+        selection_layout = QHBoxLayout(selection_frame)
+        selection_layout.setContentsMargins(8, 6, 8, 6)
 
         selection_layout.addWidget(QLabel("Working Frame:"))
         self.frame_combo = QComboBox()
         self.frame_combo.setMinimumWidth(150)
         self.frame_combo.currentTextChanged.connect(self._on_frame_selected)
         selection_layout.addWidget(self.frame_combo)
+
+        selection_layout.addSpacing(20)
 
         selection_layout.addWidget(QLabel("Active Tool:"))
         self.tool_combo = QComboBox()
@@ -152,55 +165,81 @@ class FrameManagementPanel(QFrame):
         selection_layout.addWidget(self.tool_combo)
 
         selection_layout.addStretch()
-        main_layout.addWidget(selection_group)
+        main_layout.addWidget(selection_frame)
 
-        # Workpiece frames section
-        workpiece_group = QGroupBox("Workpiece Frames")
-        workpiece_layout = QVBoxLayout(workpiece_group)
+        # --- Scrollable content for collapsible sections ---
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setFrameShape(QFrame.NoFrame)
 
-        # Workpiece list
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setContentsMargins(0, 0, 0, 0)
+        scroll_layout.setSpacing(6)
+
+        # ── Workpiece Frames ──
+        workpiece_section = CollapsibleSection("Workpiece Frames", is_expanded=True)
+
+        wp_desc = QLabel(
+            "Define coordinate frames on your workpiece using 3-point teaching. "
+            "Move the TCP to three points to define the frame origin, X-axis, "
+            "and XY plane."
+        )
+        wp_desc.setWordWrap(True)
+        wp_desc.setStyleSheet("color: #666; margin-bottom: 4px;")
+        workpiece_section.add_widget(wp_desc)
+
+        # Workpiece table
         self.workpiece_table = QTableWidget()
         self.workpiece_table.setColumnCount(4)
         self.workpiece_table.setHorizontalHeaderLabels(["Name", "X", "Y", "Z"])
-        self.workpiece_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.workpiece_table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.Stretch
+        )
         self.workpiece_table.setMaximumHeight(150)
-        workpiece_layout.addWidget(self.workpiece_table)
+        workpiece_section.add_widget(self.workpiece_table)
 
         # Workpiece buttons
         wp_btn_layout = QHBoxLayout()
-        self.btn_teach_workpiece = QPushButton("Teach New (3-Point)")
-        self.btn_teach_workpiece.clicked.connect(self._start_workpiece_teaching)
+        self.btn_teach_workpiece = QPushButton("Teach New")
+        self.btn_teach_workpiece.clicked.connect(self._show_teaching_ui)
         wp_btn_layout.addWidget(self.btn_teach_workpiece)
 
         self.btn_delete_workpiece = QPushButton("Delete Selected")
         self.btn_delete_workpiece.clicked.connect(self._delete_selected_workpiece)
         wp_btn_layout.addWidget(self.btn_delete_workpiece)
-
         wp_btn_layout.addStretch()
-        workpiece_layout.addLayout(wp_btn_layout)
+        workpiece_section.add_layout(wp_btn_layout)
 
-        main_layout.addWidget(workpiece_group)
+        # --- Inline Teaching UI (hidden by default) ---
+        self.teaching_container = QWidget()
+        self.teaching_container.setVisible(False)
+        teaching_layout = QVBoxLayout(self.teaching_container)
+        teaching_layout.setContentsMargins(0, 8, 0, 0)
 
-        # Teaching panel (shown when teaching active)
-        self.teaching_group = QGroupBox("Frame Teaching")
-        teaching_layout = QVBoxLayout(self.teaching_group)
+        separator = QFrame()
+        separator.setFrameShape(QFrame.HLine)
+        separator.setStyleSheet("color: #ccc;")
+        teaching_layout.addWidget(separator)
 
-        # Teaching name input
-        name_layout = QHBoxLayout()
-        name_layout.addWidget(QLabel("Frame Name:"))
+        # Name input + step indicator row
+        name_row = QHBoxLayout()
+        name_row.addWidget(QLabel("Frame Name:"))
         self.teaching_name_input = QLineEdit()
         self.teaching_name_input.setPlaceholderText("Enter frame name...")
-        name_layout.addWidget(self.teaching_name_input)
-        teaching_layout.addLayout(name_layout)
-
-        # Teaching progress
-        self.teaching_progress = QProgressBar()
-        self.teaching_progress.setRange(0, 3)
-        self.teaching_progress.setValue(0)
-        teaching_layout.addWidget(self.teaching_progress)
+        name_row.addWidget(self.teaching_name_input)
+        name_row.addSpacing(10)
+        self.step_dots = QLabel()
+        self.step_dots.setStyleSheet("font-size: 14px;")
+        self._update_step_dots(0)
+        name_row.addWidget(self.step_dots)
+        teaching_layout.addLayout(name_row)
 
         # Teaching message
-        self.teaching_message = QLabel("Not teaching")
+        self.teaching_message = QLabel(
+            "Enter a name and click Start to begin teaching."
+        )
         self.teaching_message.setWordWrap(True)
         self.teaching_message.setStyleSheet("color: #666; padding: 5px;")
         teaching_layout.addWidget(self.teaching_message)
@@ -227,22 +266,35 @@ class FrameManagementPanel(QFrame):
         teach_btn_layout.addWidget(self.btn_cancel_teaching)
 
         teaching_layout.addLayout(teach_btn_layout)
-        main_layout.addWidget(self.teaching_group)
+        workpiece_section.add_widget(self.teaching_container)
 
-        # Tool frames section
-        tool_group = QGroupBox("Tool Frames")
-        tool_layout = QVBoxLayout(tool_group)
+        scroll_layout.addWidget(workpiece_section)
 
-        # Tool list
+        # ── Tool Frames ──
+        tool_section = CollapsibleSection("Tool Frames", is_expanded=False)
+
+        tool_desc = QLabel(
+            "Define tool centre point (TCP) offsets. The Z offset is the "
+            "distance from the flange to the tool tip along the tool axis."
+        )
+        tool_desc.setWordWrap(True)
+        tool_desc.setStyleSheet("color: #666; margin-bottom: 4px;")
+        tool_section.add_widget(tool_desc)
+
+        # Tool table
         self.tool_table = QTableWidget()
         self.tool_table.setColumnCount(4)
-        self.tool_table.setHorizontalHeaderLabels(["Name", "Z Offset", "Description", ""])
-        self.tool_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.tool_table.setHorizontalHeaderLabels(
+            ["Name", "Z Offset", "Description", ""]
+        )
+        self.tool_table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.Stretch
+        )
         self.tool_table.setMaximumHeight(120)
         self.tool_table.cellChanged.connect(self._on_tool_table_edited)
-        tool_layout.addWidget(self.tool_table)
+        tool_section.add_widget(self.tool_table)
 
-        # Add tool section
+        # Add tool row
         add_tool_layout = QHBoxLayout()
         add_tool_layout.addWidget(QLabel("Name:"))
         self.tool_name_input = QLineEdit()
@@ -260,17 +312,27 @@ class FrameManagementPanel(QFrame):
         self.btn_add_tool.clicked.connect(self._add_tool)
         add_tool_layout.addWidget(self.btn_add_tool)
 
-        # Live-update active tool when Z offset changes
         self.tool_z_spin.valueChanged.connect(self._on_tool_z_changed)
 
         add_tool_layout.addStretch()
-        tool_layout.addLayout(add_tool_layout)
+        tool_section.add_layout(add_tool_layout)
 
-        main_layout.addWidget(tool_group)
+        scroll_layout.addWidget(tool_section)
 
-        # Base frame section
-        base_group = QGroupBox("Base Frame (Robot Mounting)")
-        base_layout = QGridLayout(base_group)
+        # ── Base Frame ──
+        base_section = CollapsibleSection("Base Frame", is_expanded=False)
+
+        base_desc = QLabel(
+            "Adjust if the robot base is not at the world origin. "
+            "Most users can leave this at defaults."
+        )
+        base_desc.setWordWrap(True)
+        base_desc.setStyleSheet("color: #666; margin-bottom: 4px;")
+        base_section.add_widget(base_desc)
+
+        base_widget = QWidget()
+        base_layout = QGridLayout(base_widget)
+        base_layout.setContentsMargins(0, 0, 0, 0)
 
         # Position
         base_layout.addWidget(QLabel("Position:"), 0, 0)
@@ -312,14 +374,64 @@ class FrameManagementPanel(QFrame):
         base_layout.addWidget(QLabel("Yaw:"), 1, 5)
         base_layout.addWidget(self.base_yaw_spin, 1, 6)
 
-        # Apply button
         self.btn_apply_base = QPushButton("Apply Base Frame")
         self.btn_apply_base.clicked.connect(self._apply_base_frame)
         base_layout.addWidget(self.btn_apply_base, 2, 0, 1, 7)
 
-        main_layout.addWidget(base_group)
+        base_section.add_widget(base_widget)
+        scroll_layout.addWidget(base_section)
 
-        main_layout.addStretch()
+        # Accordion behavior
+        self._sections = [workpiece_section, tool_section, base_section]
+        for section in self._sections:
+            section.expanded.connect(self._on_section_expanded)
+
+        scroll_layout.addStretch()
+        scroll.setWidget(scroll_content)
+        main_layout.addWidget(scroll)
+
+    # ── Accordion ──
+
+    def _on_section_expanded(self, opened_section):
+        """Accordion: collapse every section except the one just opened."""
+        for section in self._sections:
+            if section is not opened_section:
+                section.collapse()
+
+    # ── Step dots ──
+
+    def _update_step_dots(self, points_recorded: int):
+        """Update the step dot indicator (0-3 points)."""
+        filled = "\u25CF"  # ●
+        empty = "\u25CB"   # ○
+        dots = " ".join(
+            filled if i < points_recorded else empty for i in range(3)
+        )
+        self.step_dots.setText(f"{points_recorded}/3  {dots}")
+
+    # ── Teaching UI visibility ──
+
+    def _show_teaching_ui(self):
+        """Show the inline teaching UI within the workpiece section."""
+        self.teaching_container.setVisible(True)
+        self.teaching_name_input.clear()
+        self.teaching_name_input.setFocus()
+        self.btn_start_teaching.setEnabled(True)
+        self.teaching_name_input.setEnabled(True)
+        self.btn_record_point.setEnabled(False)
+        self.btn_finish_teaching.setEnabled(False)
+        self.btn_cancel_teaching.setEnabled(True)
+        self._update_step_dots(0)
+        self.teaching_message.setText(
+            "Enter a name and click Start to begin teaching."
+        )
+        self.teaching_message.setStyleSheet("color: #666; padding: 5px;")
+
+    def _hide_teaching_ui(self):
+        """Hide the inline teaching UI."""
+        self.teaching_container.setVisible(False)
+
+    # ── Refresh ──
 
     def _refresh_all_lists(self):
         """Refresh all frame lists from controller"""
@@ -387,6 +499,8 @@ class FrameManagementPanel(QFrame):
                     self.tool_table.setCellWidget(row, 3, btn)
         self.tool_table.blockSignals(False)
 
+    # ── Callbacks from controller ──
+
     def _on_frames_updated(self, frames: List[str]):
         """Callback when frames list changes"""
         self.frame_combo.blockSignals(True)
@@ -418,23 +532,35 @@ class FrameManagementPanel(QFrame):
 
     def _on_teaching_progress(self, progress: TeachingProgress):
         """Callback for teaching progress updates"""
-        self.teaching_progress.setValue(progress.points_recorded)
+        self._update_step_dots(progress.points_recorded)
         self.teaching_message.setText(progress.message)
 
         is_teaching = progress.is_teaching
         self.btn_start_teaching.setEnabled(not is_teaching)
         self.teaching_name_input.setEnabled(not is_teaching)
         self.btn_record_point.setEnabled(is_teaching)
-        self.btn_cancel_teaching.setEnabled(is_teaching)
+        self.btn_cancel_teaching.setEnabled(
+            is_teaching or progress.state == TeachingState.ERROR
+        )
         self.btn_finish_teaching.setEnabled(progress.state == TeachingState.COMPLETE)
 
-        # Update message style based on state
+        # Style message by state
         if progress.state == TeachingState.ERROR:
-            self.teaching_message.setStyleSheet("color: red; padding: 5px; font-weight: bold;")
+            self.teaching_message.setStyleSheet(
+                "color: red; padding: 5px; font-weight: bold;"
+            )
         elif progress.state == TeachingState.COMPLETE:
-            self.teaching_message.setStyleSheet("color: green; padding: 5px; font-weight: bold;")
+            self.teaching_message.setStyleSheet(
+                "color: green; padding: 5px; font-weight: bold;"
+            )
         else:
             self.teaching_message.setStyleSheet("color: #666; padding: 5px;")
+
+        # Keep teaching UI visible during active teaching
+        if is_teaching or progress.state == TeachingState.COMPLETE:
+            self.teaching_container.setVisible(True)
+
+    # ── Selection handlers ──
 
     def _on_frame_selected(self, frame_name: str):
         """Handle frame selection change"""
@@ -453,10 +579,7 @@ class FrameManagementPanel(QFrame):
                 self.tool_z_spin.setValue(info['position'][2])
                 self._updating_tool = False
 
-    def _start_workpiece_teaching(self):
-        """Start teaching a new workpiece frame"""
-        self.teaching_name_input.setFocus()
-        self.teaching_name_input.clear()
+    # ── Teaching actions ──
 
     def _start_teaching(self):
         """Start the teaching process"""
@@ -482,11 +605,15 @@ class FrameManagementPanel(QFrame):
                     self, "Success",
                     f"Created workpiece frame: {frame.name}"
                 )
+                self._hide_teaching_ui()
 
     def _cancel_teaching(self):
         """Cancel teaching process"""
         if self.frame_controller:
             self.frame_controller.cancel_teaching()
+        self._hide_teaching_ui()
+
+    # ── Workpiece actions ──
 
     def _delete_selected_workpiece(self):
         """Delete selected workpiece frame"""
@@ -505,6 +632,8 @@ class FrameManagementPanel(QFrame):
             )
             if reply == QMessageBox.Yes:
                 self.frame_controller.delete_frame(name)
+
+    # ── Tool actions ──
 
     def _on_tool_table_edited(self, row: int, col: int):
         """Handle in-place edit of tool table cells (Z Offset column)."""
@@ -586,6 +715,8 @@ class FrameManagementPanel(QFrame):
             )
             if reply == QMessageBox.Yes:
                 self.frame_controller.delete_frame(name)
+
+    # ── Base frame ──
 
     def _apply_base_frame(self):
         """Apply base frame settings"""
