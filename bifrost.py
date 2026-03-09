@@ -589,6 +589,22 @@ class BifrostGUI(Ui_MainWindow):
         if config.USE_MODERN_GUI and hasattr(self, 'frames_panel'):
             self.frames_panel.set_controller(self.frame_controller)
 
+            # Also sync the jog bar's frame selector with workpiece frames
+            if hasattr(self, 'axis_column'):
+                self.axis_column.set_available_frames(
+                    self.frame_controller.get_selectable_frames()
+                )
+                # Chain onto the existing on_frames_updated callback so the
+                # jog bar stays in sync when frames are added/removed
+                _panel_cb = self.frame_controller.on_frames_updated
+
+                def _on_frames_updated_all(frames):
+                    if _panel_cb:
+                        _panel_cb(frames)
+                    self.axis_column.set_available_frames(frames)
+
+                self.frame_controller.on_frames_updated = _on_frames_updated_all
+
         # ExecuteMovementButton no longer needed - jog mode controls in sidebar
 
     def setupGenericControls(self):
@@ -1198,10 +1214,12 @@ class BifrostGUI(Ui_MainWindow):
     def _getCurrentTCPPosition(self) -> np.ndarray:
         """Get current tool tip position (x, y, z) from forward kinematics.
         Includes active tool offset. Used as callback for frame teaching."""
-        pos = self.robot_controller.get_current_positions()
+        # Use spinbox values (always current with user's last jog) rather than
+        # robot_controller positions which lag behind M114 polling.
         tcp_transform = fk.compute_tcp_transform(
-            pos['Art1'], pos['Art2'], pos['Art3'],
-            pos['Art4'], pos['Art5'], pos['Art6']
+            self.SpinBoxArt1.value(), self.SpinBoxArt2.value(),
+            self.SpinBoxArt3.value(), self.SpinBoxArt4.value(),
+            self.SpinBoxArt5.value(), self.SpinBoxArt6.value()
         )
         tool_tip = tcp_transform @ self.frame_manager.get_active_tool_offset()
         return tool_tip[:3, 3]

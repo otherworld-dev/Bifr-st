@@ -620,7 +620,8 @@ class FrameManager:
         # Validate active selections exist
         if self._active_frame not in self._frames and self._active_frame != "tcp":
             self._active_frame = "base"
-        if self._active_tool not in self._frames:
+        if (self._active_tool not in self._frames
+                or self._frames[self._active_tool].frame_type != FrameType.TOOL):
             self._active_tool = "default_tool"
 
         logger.info(f"Loaded frames from: {filepath}")

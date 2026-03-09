@@ -575,7 +575,7 @@ class AxisControlColumn(QFrame):
         self.frame_selector = QComboBox()
         self.frame_selector.setFixedHeight(20)
         self.frame_selector.setStyleSheet("font-size: 7pt;")
-        self.frame_selector.addItems(["Base", "Tool", "World"])
+        self.frame_selector.addItems(["base", "tcp"])  # Populated from frame controller
         self.frame_selector.currentTextChanged.connect(self._on_frame_changed)
         frame_sel_layout.addWidget(self.frame_selector, 1)
 
@@ -858,9 +858,7 @@ class AxisControlColumn(QFrame):
 
     def _on_frame_changed(self, frame_text):
         """Handle coordinate frame selection change"""
-        # Convert display name to internal name
-        frame_map = {"Base": "base", "Tool": "tool", "World": "world"}
-        frame_name = frame_map.get(frame_text, "base")
+        frame_name = frame_text if frame_text else "base"
 
         if frame_name != self.current_frame:
             self.current_frame = frame_name
@@ -872,12 +870,15 @@ class AxisControlColumn(QFrame):
 
     def set_available_frames(self, frames):
         """Update the frame selector with available frames"""
+        current = self.current_frame
         self.frame_selector.blockSignals(True)
         self.frame_selector.clear()
         for frame in frames:
-            # Capitalize for display
-            display_name = frame.capitalize() if frame else "Base"
-            self.frame_selector.addItem(display_name)
+            self.frame_selector.addItem(frame)
+        # Restore previous selection if still present
+        idx = self.frame_selector.findText(current)
+        if idx >= 0:
+            self.frame_selector.setCurrentIndex(idx)
         self.frame_selector.blockSignals(False)
 
     def _on_step_clicked(self, step_value):
