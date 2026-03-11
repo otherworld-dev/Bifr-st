@@ -378,6 +378,13 @@ class BifrostGUI(Ui_MainWindow):
                 lambda a=axis: ori_spinbox_map[a].setValue(
                     ori_spinbox_map[a].value() + self.axis_column.get_step()))
 
+        # D-pad jog buttons (XY cross + Z up/down)
+        for axis in ('X', 'Y', 'Z'):
+            self.control_panel.ik_dpad_buttons[(axis, -1)].pressed.connect(
+                lambda a=axis: self.adjustIKValue(a, -self.axis_column.get_step()))
+            self.control_panel.ik_dpad_buttons[(axis, +1)].pressed.connect(
+                lambda a=axis: self.adjustIKValue(a, self.axis_column.get_step()))
+
         # Control panel: mode toggle, action buttons
         self._control_mode = "cartesian"  # Default mode
         self.control_panel.controlModeChanged.connect(self._onControlModeChanged)

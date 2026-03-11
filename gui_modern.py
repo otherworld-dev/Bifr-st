@@ -1307,8 +1307,6 @@ class ControlModePanel(QFrame):
             pos_layout.addWidget(minus_btn, row, 2)
             pos_layout.addWidget(plus_btn, row, 3)
 
-        cart_outer.addWidget(pos_group)
-
         # Orientation sub-group
         ori_group = QGroupBox("Orientation")
         ori_group.setStyleSheet("QGroupBox { font-weight: bold; }")
@@ -1353,7 +1351,66 @@ class ControlModePanel(QFrame):
             ori_layout.addWidget(plus_btn, row, 3)
             ori_layout.addWidget(hint, row, 4)
 
-        cart_outer.addWidget(ori_group)
+        # Jog D-pad: XY cross + Z up/down
+        dpad_group = QGroupBox("Jog Pad")
+        dpad_group.setStyleSheet("QGroupBox { font-weight: bold; }")
+        dpad_layout = QGridLayout(dpad_group)
+        dpad_layout.setSpacing(4)
+        dpad_layout.setContentsMargins(6, 6, 6, 6)
+
+        _DPAD_SIZE = 36
+        axis_colors = {"X": "#e04040", "Y": "#40a040", "Z": "#4070d0"}
+        self.ik_dpad_buttons = {}
+
+        def _make_dpad_btn(label, color):
+            btn = QPushButton(label)
+            btn.setFixedSize(_DPAD_SIZE, _DPAD_SIZE)
+            btn.setStyleSheet(
+                f"font-size: 14pt; font-weight: bold; color: {color}; padding: 0px;")
+            return btn
+
+        # XY cross: row 0 = Y+, row 1 = X- / X+, row 2 = Y-
+        btn_yp = _make_dpad_btn("\u25b2", axis_colors["Y"])  # up triangle
+        btn_ym = _make_dpad_btn("\u25bc", axis_colors["Y"])  # down triangle
+        btn_xm = _make_dpad_btn("\u25c0", axis_colors["X"])  # left triangle
+        btn_xp = _make_dpad_btn("\u25b6", axis_colors["X"])  # right triangle
+        self.ik_dpad_buttons[("Y", +1)] = btn_yp
+        self.ik_dpad_buttons[("Y", -1)] = btn_ym
+        self.ik_dpad_buttons[("X", -1)] = btn_xm
+        self.ik_dpad_buttons[("X", +1)] = btn_xp
+
+        dpad_layout.addWidget(btn_yp, 0, 1, Qt.AlignCenter)
+        dpad_layout.addWidget(btn_xm, 1, 0, Qt.AlignCenter)
+        dpad_layout.addWidget(btn_xp, 1, 2, Qt.AlignCenter)
+        dpad_layout.addWidget(btn_ym, 2, 1, Qt.AlignCenter)
+
+        # Z pair: column 4, rows 0 and 2
+        btn_zp = _make_dpad_btn("\u25b2", axis_colors["Z"])
+        btn_zm = _make_dpad_btn("\u25bc", axis_colors["Z"])
+        self.ik_dpad_buttons[("Z", +1)] = btn_zp
+        self.ik_dpad_buttons[("Z", -1)] = btn_zm
+
+        z_label = QLabel("Z")
+        z_label.setStyleSheet(
+            f"font-weight: bold; font-size: 10pt; color: {axis_colors['Z']};")
+        z_label.setAlignment(Qt.AlignCenter)
+        dpad_layout.addWidget(btn_zp, 0, 4, Qt.AlignCenter)
+        dpad_layout.addWidget(z_label, 1, 4, Qt.AlignCenter)
+        dpad_layout.addWidget(btn_zm, 2, 4, Qt.AlignCenter)
+
+        # Spacer column between XY cross and Z pair
+        dpad_layout.setColumnMinimumWidth(3, 20)
+
+        # Arrange: [Position + Orientation] left, [D-pad] right
+        cart_hbox = QHBoxLayout()
+        cart_hbox.setSpacing(6)
+        left_col = QVBoxLayout()
+        left_col.setSpacing(6)
+        left_col.addWidget(pos_group)
+        left_col.addWidget(ori_group)
+        cart_hbox.addLayout(left_col, 1)  # stretch — spinboxes take available width
+        cart_hbox.addWidget(dpad_group, 0, Qt.AlignVCenter)  # fixed, vertically centered
+        cart_outer.addLayout(cart_hbox)
         self.target_stack.addWidget(cartesian_page)
 
         # Page 1: Joint inputs (J1-J6 degrees) — 3x2 grid
