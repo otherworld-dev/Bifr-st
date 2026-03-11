@@ -1923,7 +1923,7 @@ class BifrostGUI(Ui_MainWindow):
         ]
         for i, spinbox in enumerate(spinboxes):
             val = self._sim_interp_start[i] + t * (self._sim_interp_end[i] - self._sim_interp_start[i])
-            spinbox.setValue(val)
+            spinbox.setValue(int(val) if isinstance(spinbox, QtWidgets.QSpinBox) else val)
 
         self._updateSimulationVisualization()
 
