@@ -40,6 +40,12 @@ test_*.json
 *_backup.py
 *_old.py
 
+# Addon models (large binary files)
+addons/voice_control/model/
+
+# Addon runtime data
+addon_data/
+
 # Development artifacts
 _ul*
 nul
