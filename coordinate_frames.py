@@ -1,5 +1,5 @@
 """
-Coordinate Frame Management for Thor Robot Arm
+Coordinate Frame Management for ThorRR Robot Arm
 
 Provides multi-frame support including:
 - World frame (absolute reference)

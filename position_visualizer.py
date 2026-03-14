@@ -1,5 +1,5 @@
 """
-Position Visualization for Thor Robot Arm
+Position Visualization for ThorRR Robot Arm
 Real-time plotting of joint positions using matplotlib
 """
 

@@ -1,5 +1,5 @@
 {
-    "_comment": "STL calibration offsets for Thor robot visualization",
+    "_comment": "STL calibration offsets for ThorRR robot visualization",
     "_usage": {
         "offset": "[x, y, z] translation in mm applied in STL local frame before FK transform",
         "rotation": "[rx, ry, rz] Euler angles in degrees (XYZ order) applied before FK transform",

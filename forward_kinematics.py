@@ -1,5 +1,5 @@
 """
-Forward Kinematics module for Thor Robot Arm - CONFIGURABLE VERSION
+Forward Kinematics module for ThorRR Robot Arm - CONFIGURABLE VERSION
 Uses DH parameters loaded from dh_parameters.json
 
 DH Parameters format:
@@ -18,7 +18,7 @@ import paths
 
 logger = logging.getLogger(__name__)
 
-# Default Thor Robot Link Lengths (in mm) - used if config file not found
+# Default ThorRR Robot Link Lengths (in mm) - used if config file not found
 L1 = 202.00  # Base height (d1)
 L2 = 160.00  # Upper arm length (a2)
 L3 = 195.00  # Forearm length (d4)
@@ -125,7 +125,7 @@ load_dh_parameters()
 def compute_all_joint_positions(q1: float, q2: float, q3: float, q4: float, q5: float, q6: float) -> List[Tuple[float, float, float]]:
     """
     Compute positions of all joints and TCP using forward kinematics
-    Uses Thor-specific transformation matrices with DH parameters from config
+    Uses ThorRR-specific transformation matrices with DH parameters from config
 
     Args:
         q1, q2, q3, q4, q5, q6: Joint angles in degrees
@@ -385,7 +385,7 @@ def compute_tcp_position_only(q1: float, q2: float, q3: float, q4: float, q5: fl
 def compute_tcp_transform(q1: float, q2: float, q3: float, q4: float, q5: float, q6: float) -> np.ndarray:
     """
     Compute TCP transformation matrix (position and orientation)
-    Uses Thor-specific DH convention matching compute_all_joint_positions
+    Uses ThorRR-specific DH convention matching compute_all_joint_positions
 
     Args:
         q1, q2, q3, q4, q5, q6: Joint angles in degrees
@@ -618,7 +618,7 @@ def get_joint_names():
 if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG)
 
-    print("Thor Robot Forward Kinematics Test - CORRECTED VERSION")
+    print("ThorRR Robot Forward Kinematics Test - CORRECTED VERSION")
     print("=" * 50)
 
     # Test home position

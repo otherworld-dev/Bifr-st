@@ -3,7 +3,7 @@ DH Parameters Panel
 ====================
 
 Provides a UI panel for viewing and editing DH (Denavit-Hartenberg) parameters
-for the Thor robot arm.
+for the ThorRR robot arm.
 """
 
 import json
@@ -182,7 +182,7 @@ class DHParametersPanel(QtWidgets.QWidget):
         button_layout.addWidget(self.save_button)
 
         self.reset_button = QtWidgets.QPushButton("🔄 Reset to Default")
-        self.reset_button.setToolTip("Reset to default Thor parameters")
+        self.reset_button.setToolTip("Reset to default ThorRR parameters")
         self.reset_button.setMinimumHeight(35)
         self.reset_button.clicked.connect(self.reset_to_default)
         self.reset_button.setStyleSheet("""
@@ -248,7 +248,7 @@ class DHParametersPanel(QtWidgets.QWidget):
             if self.dh_params is None:
                 self.dh_params = {
                     "version": "1.1",
-                    "description": "Thor Robot DH Parameters with calibration",
+                    "description": "ThorRR Robot DH Parameters with calibration",
                     "links": []
                 }
 
@@ -292,7 +292,7 @@ class DHParametersPanel(QtWidgets.QWidget):
             self.status_label.setStyleSheet("padding: 5px; background-color: #ffcdd2; border: 1px solid #ef9a9a; border-radius: 3px; color: #c62828;")
 
     def reset_to_default(self):
-        """Reset to default Thor DH parameters"""
+        """Reset to default ThorRR DH parameters"""
         self._loading = True  # Prevent multiple signals during reset
         try:
             default_params = [

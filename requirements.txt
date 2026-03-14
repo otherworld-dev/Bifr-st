@@ -1,4 +1,4 @@
-# Bifrost - Thor Robot Arm Control Software
+# Bifrost - ThorRR Robot Arm Control Software
 # Python 3.13+ recommended
 
 # Core GUI Framework

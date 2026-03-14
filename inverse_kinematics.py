@@ -1,5 +1,5 @@
 """
-Inverse Kinematics module for Thor Robot Arm
+Inverse Kinematics module for ThorRR Robot Arm
 
 Analytical solver using kinematic decoupling: position (q1-q3) then orientation (q4-q6).
 Uses FK DH parameters as single source of truth for robot geometry.
@@ -387,7 +387,7 @@ if __name__ == "__main__":
     d1, a2, a3, d4, d6 = _get_geometry()
     L_eff = np.sqrt(d4**2 + a3**2)
 
-    print("Thor Robot Inverse Kinematics Test")
+    print("ThorRR Robot Inverse Kinematics Test")
     print("=" * 60)
     print(f"Geometry: d1={d1}, a2={a2}, a3={a3}, d4={d4}, d6={d6}")
     print(f"Effective forearm: L_eff={L_eff:.3f}mm")

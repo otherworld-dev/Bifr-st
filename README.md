@@ -1,6 +1,6 @@
 # Bifrost
 
-Bifrost is a control GUI for the [Thor](https://github.com/AngelLM/Thor) open-source 6-axis robot arm, built with [PyQt5](https://riverbankcomputing.com/software/pyqt/download5).
+Bifrost is a control GUI for the [ThorRR](https://github.com/AngelLM/Thor) open-source 6-axis robot arm, built with [PyQt5](https://riverbankcomputing.com/software/pyqt/download5).
 
 Originally forked from [Asgard](https://github.com/AngelLM/Asgard), Bifrost has been extensively rewritten to target [RepRapFirmware](https://github.com/Duet3D/RepRapFirmware) on the BTT Octopus Pro v1.0 controller board, connected via USB serial.
 
@@ -60,8 +60,8 @@ Output: `dist/bifrost.exe` (~90 MB standalone executable).
 
 ## Acknowledgements
 
-- **[AngelLM](https://github.com/AngelLM)** for the original Thor robot and Asgard GUI
-- **[Thor Community](https://groups.google.com/forum/#!forum/thor-opensource-3d-printable-robotic-arm)**
+- **[AngelLM](https://github.com/AngelLM)** for the original ThorRR robot and Asgard GUI
+- **[ThorRR Community](https://groups.google.com/forum/#!forum/thor-opensource-3d-printable-robotic-arm)**
 
 ## License <img src="doc/By-sa.png" width="100">
 

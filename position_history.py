@@ -1,5 +1,5 @@
 """
-Position History Tracking for Thor Robot Arm
+Position History Tracking for ThorRR Robot Arm
 Tracks joint positions over time for visualization, analysis, and debugging
 """
 

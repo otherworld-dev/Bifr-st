@@ -1,7 +1,7 @@
 """
 Tests for differential_kinematics.py
 
-The Thor robot uses a bevel gear differential mechanism for wrist joints:
+The ThorRR robot uses a bevel gear differential mechanism for wrist joints:
 - Art5 and Art6 are logical joint angles
 - Motor V and Motor W are physical motors
 - J6 (roll) has a 2:1 mechanical reduction through the differential
