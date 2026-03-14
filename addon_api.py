@@ -40,6 +40,9 @@ class BifrostAPI:
         self._simulation_mode = False
         self._simulation_move_callback = None
 
+        # 3D visualizer reference (set via _set_position_canvas)
+        self._position_canvas = None
+
         # Event listener lists
         self._position_listeners = []
         self._connection_listeners = []
@@ -210,6 +213,24 @@ class BifrostAPI:
         self._state_listeners.append(callback)
 
     # -----------------------------------------------------------------
+    # 3D Visualization
+    # -----------------------------------------------------------------
+
+    def set_trajectory_preview(self, tcp_points):
+        """Display a trajectory preview in the 3D visualizer.
+
+        Args:
+            tcp_points: List of (x, y, z) tuples, or None to clear.
+        """
+        if self._position_canvas is not None:
+            self._position_canvas.set_sequence_preview(tcp_points)
+
+    def clear_trajectory_preview(self):
+        """Clear any trajectory preview from the 3D visualizer."""
+        if self._position_canvas is not None:
+            self._position_canvas.set_sequence_preview(None)
+
+    # -----------------------------------------------------------------
     # Addon Data
     # -----------------------------------------------------------------
 
@@ -264,6 +285,10 @@ class BifrostAPI:
     def _set_simulation_callback(self, callback):
         """Set the simulation move callback (called by BifrostGUI)."""
         self._simulation_move_callback = callback
+
+    def _set_position_canvas(self, canvas):
+        """Set the 3D visualizer reference (called by BifrostGUI)."""
+        self._position_canvas = canvas
 
     def _clear_all_listeners(self):
         """Remove all registered event listeners (called on app shutdown)."""

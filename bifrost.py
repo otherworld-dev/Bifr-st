@@ -618,6 +618,8 @@ class BifrostGUI(Ui_MainWindow):
             data_dir=paths.get_data_dir()
         )
         self.bifrost_api._set_simulation_callback(self._onSimulationSequenceMove)
+        if hasattr(self, 'position_canvas'):
+            self.bifrost_api._set_position_canvas(self.position_canvas)
         addons_dir = Path(__file__).parent / config.ADDONS_DIR
         self.addon_manager = AddonManager(addons_dir, self.bifrost_api)
         self.addon_manager.discover_and_load()
