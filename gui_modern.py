@@ -59,7 +59,7 @@ class ModernMainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Bifrost - Thor Robot Control")
+        self.setWindowTitle("Bifrost - ThorRR Robot Control")
         self.setMinimumSize(1200, 750)
 
         # Create central widget
@@ -290,6 +290,9 @@ class ModeSelectorBar(QFrame):
         self.mode_group.addButton(self.btn_teach, 1)
         layout.addWidget(self.btn_teach)
 
+        # Index where addon buttons will be inserted (after TEACH)
+        self._addon_insert_index = layout.count()
+
         # Stretch to push remaining buttons to the right
         layout.addStretch()
 
@@ -346,7 +349,9 @@ class ModeSelectorBar(QFrame):
         btn.setMinimumWidth(120)
         mode_id = len(self.mode_group.buttons())
         self.mode_group.addButton(btn, mode_id)
-        self.layout().addWidget(btn)
+        # Insert after TEACH (before the stretch), not at the end
+        self.layout().insertWidget(self._addon_insert_index, btn)
+        self._addon_insert_index += 1
         self.update_button_styles()
         return mode_id
 
@@ -1970,7 +1975,7 @@ class Ui_MainWindow:
     def setupUi(self, MainWindow):
         """Setup the modern UI directly in MainWindow"""
         # Setup window properties
-        MainWindow.setWindowTitle("Bifrost - Thor Robot Control")
+        MainWindow.setWindowTitle("Bifrost - ThorRR Robot Control")
         MainWindow.setMinimumSize(1300, 800)
         MainWindow.resize(1400, 850)  # Default size to ensure everything fits
 
