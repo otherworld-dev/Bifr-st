@@ -1,9 +1,9 @@
 """
-3D Robot Arm Visualizer for Thor Robot
+3D Robot Arm Visualizer for ThorRR Robot
 Displays robot skeleton and end effector trajectory in interactive 3D view
 PYQTGRAPH VERSION: Uses OpenGL for smooth interactive controls and better performance
 
-Realistic visualization using geometric primitives to approximate Thor robot geometry.
+Realistic visualization using geometric primitives to approximate ThorRR robot geometry.
 """
 
 import numpy as np
@@ -521,9 +521,9 @@ class Robot3DCanvas(gl.GLViewWidget):
         self.stl_calibration = get_stl_calibration()
 
         # Colour schemes (RGBA format for PyQtGraph)
-        # Thor robot colours - orange body with contrasting accents
+        # ThorRR robot colours - orange body with contrasting accents
         self.colors_active = {
-            'body': (1.0, 0.55, 0.2, 1.0),       # Thor orange
+            'body': (1.0, 0.55, 0.2, 1.0),       # ThorRR orange
             'body_dark': (0.95, 0.48, 0.12, 1.0),  # Darker orange
             'joint': (0.47, 0.47, 0.47, 1.0),   # Medium grey for joint rings
             'accent': (0.38, 0.38, 0.38, 1.0),  # Dark grey accents
@@ -940,7 +940,7 @@ class Robot3DCanvas(gl.GLViewWidget):
 
     def draw_robot_arm(self, joint_positions, active=True, joint_angles=None):
         """
-        Draw Thor robot arm - dispatches to STL or primitive rendering.
+        Draw ThorRR robot arm - dispatches to STL or primitive rendering.
 
         Args:
             joint_positions: List of 7 tuples [(x,y,z), ...] for joints
@@ -960,7 +960,7 @@ class Robot3DCanvas(gl.GLViewWidget):
 
     def _draw_robot_stl(self, joint_angles, active=True):
         """
-        Draw Thor robot using actual STL mesh files.
+        Draw ThorRR robot using actual STL mesh files.
 
         Args:
             joint_angles: Tuple (q1, q2, q3, q4, q5, q6) in degrees
@@ -1052,7 +1052,7 @@ class Robot3DCanvas(gl.GLViewWidget):
 
     def _draw_robot_primitives(self, joint_positions, active=True):
         """
-        Draw Thor robot arm using geometric primitives (cylinders, boxes).
+        Draw ThorRR robot arm using geometric primitives (cylinders, boxes).
         Fallback when STL files are not available.
 
         Joint positions from FK (7 positions):
@@ -1112,7 +1112,7 @@ class Robot3DCanvas(gl.GLViewWidget):
         pos = [np.array(p) for p in joint_positions]
 
         # =====================================================================
-        # Thor Robot Geometry (approximate dimensions from image)
+        # ThorRR Robot Geometry (approximate dimensions from image)
         # =====================================================================
 
         # 1. BASE PLATFORM - Rectangular box at ground level
@@ -2370,14 +2370,14 @@ if __name__ == '__main__':
 
     logging.basicConfig(level=logging.DEBUG)
 
-    print("Thor Robot 3D Visualizer Test (PyQtGraph)")
+    print("ThorRR Robot 3D Visualizer Test (PyQtGraph)")
     print("=" * 50)
 
     app = QtWidgets.QApplication(sys.argv)
 
     # Create main window
     window = QtWidgets.QMainWindow()
-    window.setWindowTitle("Thor Robot 3D Visualizer Test (PyQtGraph)")
+    window.setWindowTitle("ThorRR Robot 3D Visualizer Test (PyQtGraph)")
     window.setGeometry(100, 100, 900, 700)
 
     # Create central widget

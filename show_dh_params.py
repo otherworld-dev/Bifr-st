@@ -1,5 +1,5 @@
 """
-Display DH Parameters for Thor Robot
+Display DH Parameters for ThorRR Robot
 """
 
 print('=' * 70)
@@ -77,7 +77,7 @@ print('1. Joint 2 has a -90 degree OFFSET in the transformation!')
 print('   - This means q2=0 corresponds to the arm pointing HORIZONTALLY backward (-X)')
 print('   - q2=90 would point vertically UP')
 print()
-print('2. This is the ORIGINAL Thor DH convention from SymPy code')
+print('2. This is the ORIGINAL ThorRR DH convention from SymPy code')
 print()
 print('3. At home position (all zeros):')
 print('   - Arm points horizontally in -X direction (backward)')

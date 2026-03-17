@@ -59,7 +59,7 @@ class ModernMainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Bifrost - Thor Robot Control")
+        self.setWindowTitle("Bifrost - ThorRR Robot Control")
         self.setMinimumSize(1200, 750)
 
         # Create central widget
@@ -290,6 +290,9 @@ class ModeSelectorBar(QFrame):
         self.mode_group.addButton(self.btn_teach, 1)
         layout.addWidget(self.btn_teach)
 
+        # Index where addon buttons will be inserted (after TEACH)
+        self._addon_insert_index = layout.count()
+
         # Stretch to push remaining buttons to the right
         layout.addStretch()
 
@@ -328,6 +331,29 @@ class ModeSelectorBar(QFrame):
         mode_id = self.mode_group.id(button)
         self.mode_changed.emit(mode_id)
         self.update_button_styles()
+
+    def add_mode(self, label, icon=""):
+        """Dynamically add a mode button (used by addon system).
+
+        Args:
+            label: Text for the button.
+            icon: Optional emoji prefix.
+
+        Returns:
+            int: The assigned mode ID.
+        """
+        text = f"{icon} {label}" if icon else label
+        btn = QPushButton(text)
+        btn.setCheckable(True)
+        btn.setMinimumHeight(35)
+        btn.setMinimumWidth(120)
+        mode_id = len(self.mode_group.buttons())
+        self.mode_group.addButton(btn, mode_id)
+        # Insert after TEACH (before the stretch), not at the end
+        self.layout().insertWidget(self._addon_insert_index, btn)
+        self._addon_insert_index += 1
+        self.update_button_styles()
+        return mode_id
 
     def update_button_styles(self):
         """Update visual style of mode buttons"""
@@ -1974,6 +2000,25 @@ class Ui_MainWindow:
             current.show()  # Force show the current widget
             current.raise_()  # Bring to front
 
+    def register_addon_mode(self, label, icon, panel_widget):
+        """Register an addon as a new mode tab.
+
+        Args:
+            label: Tab button text.
+            icon: Emoji prefix for the button.
+            panel_widget: QWidget to show when the tab is selected.
+
+        Returns:
+            int: The mode index assigned to this addon.
+        """
+        mode_id = self.mode_selector.add_mode(label, icon)
+        stack_index = self.mode_stack.addWidget(panel_widget)
+        assert mode_id == stack_index, (
+            f"Mode ID {mode_id} != stack index {stack_index} — "
+            "mode_stack and mode_group are out of sync"
+        )
+        return mode_id
+
     def _fix_splitter_sizes(self):
         """Force splitter to correct sizes after window is shown"""
         if hasattr(self, 'content_splitter'):
@@ -1987,7 +2032,7 @@ class Ui_MainWindow:
     def setupUi(self, MainWindow):
         """Setup the modern UI directly in MainWindow"""
         # Setup window properties
-        MainWindow.setWindowTitle("Bifrost - Thor Robot Control")
+        MainWindow.setWindowTitle("Bifrost - ThorRR Robot Control")
         MainWindow.setMinimumSize(1300, 800)
         MainWindow.resize(1400, 850)  # Default size to ensure everything fits
 

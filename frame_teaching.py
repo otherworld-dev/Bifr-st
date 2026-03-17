@@ -1,5 +1,5 @@
 """
-Frame Teaching Module for Thor Robot Arm
+Frame Teaching Module for ThorRR Robot Arm
 
 Provides 3-point teaching method for defining workpiece frames:
 1. Point 1 (Origin): Defines frame origin

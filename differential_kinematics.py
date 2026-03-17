@@ -1,5 +1,5 @@
 """
-Differential Kinematics for Thor Robot Arm
+Differential Kinematics for ThorRR Robot Arm
 Handles conversion between joint angles (Art5, Art6) and differential motor positions (V, W)
 
 The robot uses a bevel gear differential mechanism for the last two wrist joints:

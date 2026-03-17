@@ -495,7 +495,7 @@ class DHParametersWidget(QtWidgets.QWidget):
 
             dh_data = {
                 "version": "1.1",
-                "description": "Thor Robot DH Parameters",
+                "description": "ThorRR Robot DH Parameters",
                 "date_modified": QtCore.QDateTime.currentDateTime().toString("yyyy-MM-dd"),
                 "links": []
             }
@@ -524,7 +524,7 @@ class DHParametersWidget(QtWidgets.QWidget):
             raise
 
     def reset_to_default(self):
-        """Reset to default Thor DH parameters"""
+        """Reset to default ThorRR DH parameters"""
         self._loading = True
         try:
             default_params = [

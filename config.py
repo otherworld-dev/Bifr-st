@@ -136,5 +136,8 @@ PARK_POSITION = {
     'Art4': 0.0, 'Art5': 0.0, 'Art6': 0.0,
 }
 
+# ========== Addons ==========
+ADDONS_DIR = "addons"  # Directory for addon packages (relative to app root)
+
 # ========== Simulation Mode ==========
 USE_SIMULATION_MODE = False  # Set to True to use simulated robot (no hardware required)

@@ -25,6 +25,8 @@ import parsing_patterns
 from command_builder import CommandBuilder, SerialCommandSender
 from robot_controller import RobotController
 from serial_manager import SerialManager
+from addon_api import BifrostAPI
+from addon_manager import AddonManager
 from serial_thread import SerialThread
 from connection_manager import ConnectionManager, ConnectionState
 from movement_controller import MovementController, MovementParams, get_movement_params_from_gui
@@ -611,6 +613,28 @@ class BifrostGUI(Ui_MainWindow):
                     self.axis_column.set_available_frames(frames)
 
                 self.frame_controller.on_frames_updated = _on_frames_updated_all
+
+        # --- Addon System ---
+        self.bifrost_api = BifrostAPI(
+            robot_controller=self.robot_controller,
+            command_sender=self.command_sender,
+            connection_manager=self.connection_manager,
+            gripper_controller=self.gripper_controller
+                if hasattr(self, 'gripper_controller') else None,
+            data_dir=paths.get_data_dir()
+        )
+        self.bifrost_api._set_simulation_callback(self._onSimulationSequenceMove)
+        if hasattr(self, 'position_canvas'):
+            self.bifrost_api._set_position_canvas(self.position_canvas)
+        addons_dir = paths.get_exe_dir() / config.ADDONS_DIR
+        self.addon_manager = AddonManager(addons_dir, self.bifrost_api)
+        self.addon_manager.discover_and_load()
+
+        # Register addon panels as mode tabs
+        self._addon_mode_map = {}  # mode_index -> addon_name
+        for name, icon, panel in self.addon_manager.get_panels():
+            mode_id = self.register_addon_mode(name, icon, panel)
+            self._addon_mode_map[mode_id] = name
 
         # ExecuteMovementButton no longer needed - jog mode controls in sidebar
 
@@ -1601,9 +1625,18 @@ class BifrostGUI(Ui_MainWindow):
             self.mode_selector.mode_changed.connect(self._onModeChanged)
 
     def _onModeChanged(self, mode_index):
-        """Handle mode switching - exit DH preview mode when leaving DH panel"""
+        """Handle mode switching - exit DH preview mode and notify addons"""
         # Delegate to visualisation controller
-        self.visualization_controller.on_mode_changed(mode_index, dh_mode_index=5)
+        self.visualization_controller.on_mode_changed(mode_index, dh_mode_index=3)
+
+        # Notify addons of activate/deactivate
+        if hasattr(self, '_addon_mode_map'):
+            previous = getattr(self, '_previous_mode_index', None)
+            if previous is not None and previous in self._addon_mode_map:
+                self.addon_manager.notify_deactivate(self._addon_mode_map[previous])
+            if mode_index in self._addon_mode_map:
+                self.addon_manager.notify_activate(self._addon_mode_map[mode_index])
+            self._previous_mode_index = mode_index
 
     def updateModern3DVisualization(self):
         """Update the modern GUI 3D visualisation - delegates to VisualizationController"""
@@ -1843,6 +1876,7 @@ class BifrostGUI(Ui_MainWindow):
     def _onSimulationModeToggled(self, enabled):
         """Handle simulation mode checkbox toggle"""
         self.sequence_controller.simulation_mode = enabled
+        self.bifrost_api._set_simulation_mode(enabled)
         if enabled:
             logger.info("Simulation mode enabled - direct visualization control")
             self.SerialPortComboBox.setEnabled(False)
@@ -2000,6 +2034,10 @@ class BifrostGUI(Ui_MainWindow):
 
         logger.info("Requesting position update to initialize differential tracking")
 
+        # Notify addon listeners
+        if hasattr(self, 'bifrost_api'):
+            self.bifrost_api._emit_connection_change(True)
+
     def _onConnectionError(self, error_msg):
         """Called when connection fails (runs in GUI thread)"""
         self.serialDisconnected()
@@ -2036,6 +2074,10 @@ class BifrostGUI(Ui_MainWindow):
     def serialDisconnected(self):
         """Handle serial disconnection - delegates to UIStateManager"""
         self.ui_state_manager.update_connection_state(UIConnectionState.DISCONNECTED)
+
+        # Notify addon listeners
+        if hasattr(self, 'bifrost_api'):
+            self.bifrost_api._emit_connection_change(False)
 
     # Callback methods for SerialResponseRouter
     def _handleSerialDisconnect(self):
@@ -2167,10 +2209,18 @@ class BifrostGUI(Ui_MainWindow):
         if hasattr(self, 'axis_column') and self.axis_column.get_mode() != "joint":
             self._updateAxisColumnValues()
 
+        # Notify addon listeners
+        if hasattr(self, 'bifrost_api'):
+            self.bifrost_api._emit_position_update(positions)
+
     def _onStateUpdate(self, state, color):
         """Callback to update robot state display"""
         self.RobotStateDisplay.setText(state)
         self.RobotStateDisplay.setStyleSheet(f'background-color: {color}')
+
+        # Notify addon listeners
+        if hasattr(self, 'bifrost_api'):
+            self.bifrost_api._emit_state_change(state)
 
     def _onEndstopUpdate(self, axis, text, style):
         """Callback to update endstop label/indicator"""
@@ -2560,6 +2610,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def closeEvent(self, event):
         """Handle window close event with proper cleanup"""
+        # Unload addons first
+        if hasattr(self.gui_instance, 'addon_manager'):
+            self.gui_instance.addon_manager.unload_all()
+
         # Stop serial thread if running
         if self.gui_instance.SerialThreadClass and self.gui_instance.SerialThreadClass.isRunning():
             logger.info("Stopping serial thread...")

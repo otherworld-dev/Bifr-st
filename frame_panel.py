@@ -1,5 +1,5 @@
 """
-Frame Management Panel for Thor Robot Arm GUI
+Frame Management Panel for ThorRR Robot Arm GUI
 
 Provides UI for:
 - Frame/tool selection

@@ -1,5 +1,5 @@
 """
-Sequence Recorder module for Thor Robot Arm
+Sequence Recorder module for ThorRR Robot Arm
 Records, saves, loads, and plays back robot movement sequences
 """
 

@@ -1,5 +1,5 @@
 // Board Hardware configuration file for BTT Octopus Pro v1.0 F429
-// For Thor robot arm - Standalone mode
+// For ThorRR robot arm - Standalone mode
 
 board = biqoctopuspro_1.0
 
