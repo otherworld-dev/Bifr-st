@@ -2,8 +2,16 @@
 
 Handles the difference between running from source and running as a
 frozen PyInstaller executable:
-- Bundle dir: read-only resources (STLs) — temp extraction dir when frozen
-- Data dir: writable configs (JSON calibration files) — next to exe when frozen
+
+  Frozen layout (next to bifrost.exe):
+    bifrost.exe
+    addons/          <- addon packages (discovered at runtime)
+    calibration/     <- writable config JSONs (created on first launch)
+
+  Dev layout (project root):
+    bifrost.py
+    addons/
+    *.json           <- configs live in project root directly
 """
 import sys
 import shutil
@@ -12,7 +20,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Files that get copied to the data dir on first launch
+# Files that get copied to the calibration dir on first launch
 _DEFAULT_CONFIGS = [
     'dh_parameters.json',
     'gripper_calibration.json',
@@ -25,6 +33,17 @@ _DEFAULT_CONFIGS = [
 def is_frozen() -> bool:
     """True when running as a PyInstaller bundle."""
     return getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')
+
+
+def get_exe_dir() -> Path:
+    """Directory containing the executable (or project root in dev).
+
+    Use this for resolving external folders that live next to the exe
+    (addons/, calibration/).
+    """
+    if is_frozen():
+        return Path(sys.executable).parent
+    return Path(__file__).parent
 
 
 def get_bundle_dir() -> Path:
@@ -41,11 +60,11 @@ def get_bundle_dir() -> Path:
 def get_data_dir() -> Path:
     """Writable config/data directory.
 
-    - Frozen: Bifrost_Data/ folder next to the exe
+    - Frozen: calibration/ folder next to the exe
     - Dev: project root (no change from current behaviour)
     """
     if is_frozen():
-        return Path(sys.executable).parent / 'Bifrost_Data'
+        return get_exe_dir() / 'calibration'
     return Path(__file__).parent
 
 
