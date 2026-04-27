@@ -985,10 +985,13 @@ class RobotStatePanel(QFrame):
         self.show_workspace_check.setChecked(False)
         self.auto_rotate_check = QCheckBox("Auto-rotate")
         self.auto_rotate_check.setChecked(False)
+        self.show_chessboard_check = QCheckBox("Chessboard")
+        self.show_chessboard_check.setChecked(False)
         viz_controls.addWidget(self.show_trajectory_check)
         viz_controls.addWidget(self.show_joint_frames_check)
         viz_controls.addWidget(self.show_workspace_check)
         viz_controls.addWidget(self.auto_rotate_check)
+        viz_controls.addWidget(self.show_chessboard_check)
         viz_controls.addStretch()
         viz_layout.addLayout(viz_controls)
 
@@ -2218,6 +2221,7 @@ class Ui_MainWindow:
         self.show_joint_frames_check = self.robot_state_panel.show_joint_frames_check
         self.show_workspace_check = self.robot_state_panel.show_workspace_check
         self.auto_rotate_check = self.robot_state_panel.auto_rotate_check
+        self.show_chessboard_check = self.robot_state_panel.show_chessboard_check
 
         # Gripper buttons also need non-FK aliases for compatibility
         self.Dec10ButtonGripper = self.FKDec10ButtonGripper

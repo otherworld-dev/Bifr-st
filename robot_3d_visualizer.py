@@ -514,6 +514,10 @@ class Robot3DCanvas(gl.GLViewWidget):
         self.rotation_angle = 45  # Current azimuth for auto-rotate
         self.show_joint_frames = False
         self._joint_frame_items = []  # GL items for joint coordinate frames
+        self.show_chessboard = False
+        self._chessboard_initialized = False
+        self._chessboard_items = []        # GLMeshItem squares + border line
+        self._chessboard_label_items = []  # GLTextItem labels
 
         # STL visualisation options
         self.use_stl = STL_AVAILABLE  # Use STL meshes if available
@@ -771,6 +775,11 @@ class Robot3DCanvas(gl.GLViewWidget):
         if self.show_grid:
             self._ensure_grid_initialized()
 
+        # Show chessboard if enabled
+        if self.show_chessboard:
+            self._draw_chessboard()
+            self._ensure_chessboard_in_scene()
+
         # Show robot at home position (all joints at 0)
         home_angles = (0, 0, 0, 0, 0, 0)
         home_positions = fk.compute_all_joint_positions(*home_angles)
@@ -864,6 +873,124 @@ class Robot3DCanvas(gl.GLViewWidget):
             except Exception:
                 pass
 
+        if self.show_chessboard:
+            self._draw_chessboard()
+            self._ensure_chessboard_in_scene()
+        else:
+            self._remove_chessboard_from_scene()
+
+    # =========================================================================
+    # Chessboard Visualisation (6x6 Pick-and-Place Board)
+    # =========================================================================
+
+    # Board geometry constants (from ThorRR_Chessboard spec)
+    _CHESSBOARD_SQUARE_SIZE = 31.0    # mm per square
+    _CHESSBOARD_Y_A1_CORNER = 93.0    # Y coordinate of A1 corner: 3*31=93 so C/D line is at Y=0
+    _CHESSBOARD_X_OFFSET = 100.0      # X offset: board row 1 near edge at front of base
+    _CHESSBOARD_Z_HEIGHT = 0.0        # Z height of board surface
+    _CHESSBOARD_THICKNESS = 1.5       # Visual thickness of square tiles (mm)
+    _CHESSBOARD_COLUMNS = 'ABCDEF'
+    _CHESSBOARD_LIGHT = (0.96, 0.93, 0.82, 1.0)   # Warm cream
+    _CHESSBOARD_DARK = (0.55, 0.35, 0.18, 1.0)    # Warm brown
+
+    def _draw_chessboard(self):
+        """Create the 6x6 chessboard as persistent mesh items (created once)."""
+        if self._chessboard_initialized:
+            return
+
+        self._clear_chessboard()
+
+        sq = self._CHESSBOARD_SQUARE_SIZE
+        y_a1 = self._CHESSBOARD_Y_A1_CORNER
+        x_off = self._CHESSBOARD_X_OFFSET
+        z = self._CHESSBOARD_Z_HEIGHT
+        thickness = self._CHESSBOARD_THICKNESS
+
+        for col_idx in range(6):       # A=0 .. F=5
+            for row_idx in range(6):   # row 1=0 .. row 6=5
+                # Center of this square
+                cx = x_off + (row_idx + 0.5) * sq
+                cy = y_a1 - (col_idx + 0.5) * sq
+                cz = z + thickness / 2
+
+                is_light = (col_idx + row_idx) % 2 == 0
+                color = self._CHESSBOARD_LIGHT if is_light else self._CHESSBOARD_DARK
+
+                verts, faces = create_box_mesh(sq, sq, thickness)
+                # Offset vertices to position (faster than per-frame transform)
+                verts = verts + np.array([cx, cy, cz], dtype=np.float32)
+
+                md = gl.MeshData(vertexes=verts, faces=faces)
+                mesh = gl.GLMeshItem(
+                    meshdata=md, smooth=False,
+                    color=pg.mkColor(int(color[0]*255), int(color[1]*255),
+                                     int(color[2]*255), int(color[3]*255)),
+                    shader='balloon', glOptions='opaque'
+                )
+                self._chessboard_items.append(mesh)
+
+                # Square label
+                label = f"{self._CHESSBOARD_COLUMNS[col_idx]}{row_idx + 1}"
+                text_rgba = self._CHESSBOARD_DARK if is_light else self._CHESSBOARD_LIGHT
+                text_item = gl.GLTextItem(
+                    pos=np.array([cx, cy, z + thickness + 0.5]),
+                    text=label,
+                    color=pg.mkColor(int(text_rgba[0]*255), int(text_rgba[1]*255),
+                                     int(text_rgba[2]*255), 200),
+                    font=QtGui.QFont('Arial', 7)
+                )
+                self._chessboard_label_items.append(text_item)
+
+        # Border outline
+        x0 = x_off
+        x1 = x_off + 6 * sq
+        y0 = y_a1 - 6 * sq
+        y1 = y_a1
+        bz = z + thickness + 0.2
+        border_pts = np.array([
+            [x0, y0, bz], [x1, y0, bz], [x1, y1, bz],
+            [x0, y1, bz], [x0, y0, bz]
+        ])
+        border = gl.GLLinePlotItem(
+            pos=border_pts, color=(0.1, 0.1, 0.1, 0.8),
+            width=2, antialias=True
+        )
+        self._chessboard_items.append(border)
+
+        self._chessboard_initialized = True
+        logger.debug("Chessboard created (36 squares + border)")
+
+    def _ensure_chessboard_in_scene(self):
+        """Add chessboard items to scene if not already present."""
+        for item in self._chessboard_items:
+            if item not in self.items:
+                self.addItem(item)
+        for item in self._chessboard_label_items:
+            if item not in self.items:
+                self.addItem(item)
+
+    def _remove_chessboard_from_scene(self):
+        """Remove chessboard items from scene without destroying them."""
+        for item in self._chessboard_items:
+            if item in self.items:
+                try:
+                    self.removeItem(item)
+                except Exception:
+                    pass
+        for item in self._chessboard_label_items:
+            if item in self.items:
+                try:
+                    self.removeItem(item)
+                except Exception:
+                    pass
+
+    def _clear_chessboard(self):
+        """Remove and destroy all chessboard items."""
+        self._remove_chessboard_from_scene()
+        self._chessboard_items.clear()
+        self._chessboard_label_items.clear()
+        self._chessboard_initialized = False
+
     def clear_all_items(self):
         """Remove all graphics items from the view"""
         # Clear all items (including grid)
@@ -923,6 +1050,9 @@ class Robot3DCanvas(gl.GLViewWidget):
                 except Exception:
                     pass
         self.tool_tip_items = []
+
+        # Clear chessboard items
+        self._clear_chessboard()
 
         # Reset references
         self.robot_arm_item = None
@@ -2233,6 +2363,8 @@ class Robot3DCanvas(gl.GLViewWidget):
             self.show_grid = options.get('show_grid', True)
             self.show_labels = options.get('show_labels', False)
             self.auto_rotate = options.get('auto_rotate', False)
+            # Note: show_chessboard is set directly by the toggle handler,
+            # not via the options dict (same pattern as show_joint_frames)
 
             # If no data, show home position (only once)
             if len(position_history) == 0:
@@ -2274,6 +2406,13 @@ class Robot3DCanvas(gl.GLViewWidget):
             # OPTIMIZATION: Ensure grid is initialized (persistent, not recreated)
             if self.show_grid:
                 self._ensure_grid_initialized()
+
+            # Chessboard overlay
+            if self.show_chessboard:
+                self._draw_chessboard()
+                self._ensure_chessboard_in_scene()
+            else:
+                self._remove_chessboard_from_scene()
 
             # OPTIMIZATION: Use persistent meshes with GPU transforms (fast path)
             if self.show_robot:

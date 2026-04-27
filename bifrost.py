@@ -1596,6 +1596,10 @@ class BifrostGUI(Ui_MainWindow):
         if hasattr(self, 'show_workspace_check'):
             self.show_workspace_check.toggled.connect(self._onWorkspaceToggled)
 
+        # Connect chessboard checkbox to canvas flag
+        if hasattr(self, 'show_chessboard_check'):
+            self.show_chessboard_check.toggled.connect(self._onChessboardToggled)
+
         # Connect DH panel signals (deferred to ensure all widgets are ready)
         # Use QTimer.singleShot to connect after event loop processes pending events
         QtCore.QTimer.singleShot(100, self._connectDHPanelSignals)
@@ -2421,6 +2425,16 @@ class BifrostGUI(Ui_MainWindow):
         """Handle workspace checkbox toggle"""
         if hasattr(self, 'position_canvas') and self.position_canvas:
             self.position_canvas.show_workspace = enabled
+            joint_angles = [
+                self.SpinBoxArt1.value(), self.SpinBoxArt2.value(), self.SpinBoxArt3.value(),
+                self.SpinBoxArt4.value(), self.SpinBoxArt5.value(), self.SpinBoxArt6.value()
+            ]
+            self.position_canvas.update_robot(joint_angles)
+
+    def _onChessboardToggled(self, enabled):
+        """Handle chessboard checkbox toggle"""
+        if hasattr(self, 'position_canvas') and self.position_canvas:
+            self.position_canvas.show_chessboard = enabled
             joint_angles = [
                 self.SpinBoxArt1.value(), self.SpinBoxArt2.value(), self.SpinBoxArt3.value(),
                 self.SpinBoxArt4.value(), self.SpinBoxArt5.value(), self.SpinBoxArt6.value()
