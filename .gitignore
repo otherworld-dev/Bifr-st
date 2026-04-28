@@ -15,6 +15,9 @@ build/
 *.swo
 
 
+# Claude Code
+.claude/
+
 # Firmware/Board config
 sys/
 

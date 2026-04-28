@@ -957,8 +957,46 @@ class Robot3DCanvas(gl.GLViewWidget):
         )
         self._chessboard_items.append(border)
 
+        # Start position — adjacent to A1, one square-gap beyond column A
+        start_cx = x_off + 0.5 * sq          # Aligned with row 1 centre
+        start_cy = y_a1 + sq                  # One square beyond A edge
+        start_color = (0.2, 0.5, 0.75, 1.0)  # Distinct blue
+        start_verts, start_faces = create_box_mesh(sq, sq, thickness)
+        start_verts = start_verts + np.array([start_cx, start_cy, z + thickness / 2],
+                                             dtype=np.float32)
+        start_md = gl.MeshData(vertexes=start_verts, faces=start_faces)
+        start_mesh = gl.GLMeshItem(
+            meshdata=start_md, smooth=False,
+            color=pg.mkColor(int(start_color[0]*255), int(start_color[1]*255),
+                             int(start_color[2]*255), int(start_color[3]*255)),
+            shader='balloon', glOptions='opaque'
+        )
+        self._chessboard_items.append(start_mesh)
+
+        # Start position label
+        start_label = gl.GLTextItem(
+            pos=np.array([start_cx, start_cy, z + thickness + 0.5]),
+            text='START',
+            color=pg.mkColor(220, 30, 30, 230),
+            font=QtGui.QFont('Arial', 7, QtGui.QFont.Bold)
+        )
+        self._chessboard_label_items.append(start_label)
+
+        # Start position border
+        sx0, sx1 = start_cx - sq / 2, start_cx + sq / 2
+        sy0, sy1 = start_cy - sq / 2, start_cy + sq / 2
+        start_border_pts = np.array([
+            [sx0, sy0, bz], [sx1, sy0, bz], [sx1, sy1, bz],
+            [sx0, sy1, bz], [sx0, sy0, bz]
+        ])
+        start_border = gl.GLLinePlotItem(
+            pos=start_border_pts, color=(0.1, 0.1, 0.1, 0.8),
+            width=2, antialias=True
+        )
+        self._chessboard_items.append(start_border)
+
         self._chessboard_initialized = True
-        logger.debug("Chessboard created (36 squares + border)")
+        logger.debug("Chessboard created (36 squares + start position + border)")
 
     def _ensure_chessboard_in_scene(self):
         """Add chessboard items to scene if not already present."""
