@@ -987,11 +987,24 @@ class RobotStatePanel(QFrame):
         self.auto_rotate_check.setChecked(False)
         self.show_chessboard_check = QCheckBox("Chessboard")
         self.show_chessboard_check.setChecked(False)
+        self.chessboard_x_label = QLabel("X:")
+        self.chessboard_x_label.setVisible(False)
+        self.chessboard_x_spinbox = QDoubleSpinBox()
+        self.chessboard_x_spinbox.setRange(-500, 500)
+        self.chessboard_x_spinbox.setValue(100.0)
+        self.chessboard_x_spinbox.setSuffix(" mm")
+        self.chessboard_x_spinbox.setDecimals(0)
+        self.chessboard_x_spinbox.setFixedWidth(90)
+        self.chessboard_x_spinbox.setVisible(False)
+        self.show_chessboard_check.toggled.connect(self.chessboard_x_label.setVisible)
+        self.show_chessboard_check.toggled.connect(self.chessboard_x_spinbox.setVisible)
         viz_controls.addWidget(self.show_trajectory_check)
         viz_controls.addWidget(self.show_joint_frames_check)
         viz_controls.addWidget(self.show_workspace_check)
         viz_controls.addWidget(self.auto_rotate_check)
         viz_controls.addWidget(self.show_chessboard_check)
+        viz_controls.addWidget(self.chessboard_x_label)
+        viz_controls.addWidget(self.chessboard_x_spinbox)
         viz_controls.addStretch()
         viz_layout.addLayout(viz_controls)
 
@@ -2222,6 +2235,7 @@ class Ui_MainWindow:
         self.show_workspace_check = self.robot_state_panel.show_workspace_check
         self.auto_rotate_check = self.robot_state_panel.auto_rotate_check
         self.show_chessboard_check = self.robot_state_panel.show_chessboard_check
+        self.chessboard_x_spinbox = self.robot_state_panel.chessboard_x_spinbox
 
         # Gripper buttons also need non-FK aliases for compatibility
         self.Dec10ButtonGripper = self.FKDec10ButtonGripper

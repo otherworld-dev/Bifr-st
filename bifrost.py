@@ -1596,9 +1596,11 @@ class BifrostGUI(Ui_MainWindow):
         if hasattr(self, 'show_workspace_check'):
             self.show_workspace_check.toggled.connect(self._onWorkspaceToggled)
 
-        # Connect chessboard checkbox to canvas flag
+        # Connect chessboard checkbox and X offset spinbox
         if hasattr(self, 'show_chessboard_check'):
             self.show_chessboard_check.toggled.connect(self._onChessboardToggled)
+        if hasattr(self, 'chessboard_x_spinbox'):
+            self.chessboard_x_spinbox.valueChanged.connect(self._onChessboardXChanged)
 
         # Connect DH panel signals (deferred to ensure all widgets are ready)
         # Use QTimer.singleShot to connect after event loop processes pending events
@@ -2462,6 +2464,11 @@ class BifrostGUI(Ui_MainWindow):
                 self.SpinBoxArt4.value(), self.SpinBoxArt5.value(), self.SpinBoxArt6.value()
             ]
             self.position_canvas.update_robot(joint_angles)
+
+    def _onChessboardXChanged(self, value):
+        """Handle chessboard X offset spinbox change — rebuild the board."""
+        if hasattr(self, 'position_canvas') and self.position_canvas:
+            self.position_canvas.set_chessboard_x_offset(value)
 
     def _getAutoRotateEnabled(self):
         """Callback to get auto-rotate checkbox state"""

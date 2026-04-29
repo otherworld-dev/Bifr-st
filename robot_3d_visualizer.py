@@ -1022,6 +1022,14 @@ class Robot3DCanvas(gl.GLViewWidget):
                 except Exception:
                     pass
 
+    def set_chessboard_x_offset(self, x_offset: float):
+        """Change the chessboard X offset and rebuild if visible."""
+        self._CHESSBOARD_X_OFFSET = x_offset
+        if self._chessboard_initialized:
+            self._clear_chessboard()
+            self._draw_chessboard()
+            self._ensure_chessboard_in_scene()
+
     def _clear_chessboard(self):
         """Remove and destroy all chessboard items."""
         self._remove_chessboard_from_scene()
