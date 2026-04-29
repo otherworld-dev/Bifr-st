@@ -41,7 +41,6 @@ GUI_UPDATE_INTERVAL = 0.1  # seconds (10Hz max) - faster visual feedback
 LOGGING_INTERVAL_POSITIONS = 50  # Log position every Nth update - minimized logging spam
 
 # ========== Sequence Playback ==========
-SEQUENCE_TIMER_INTERVAL = 100  # milliseconds between playback updates
 SEQUENCE_SPEED_MIN = 0.1
 SEQUENCE_SPEED_MAX = 10.0
 

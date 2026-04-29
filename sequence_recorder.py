@@ -234,18 +234,22 @@ class SequencePlayer:
         self.loop_enabled = False
         self.current_point_index = 0
         self.current_sequence = None
-        self.last_move_time = 0
 
-    def start_playback(self, sequence: Sequence, speed: float = 1.0, loop: bool = False) -> None:
+    def start_playback(self, sequence: Sequence, speed: float = 1.0, loop: bool = False) -> int:
         """
-        Start playback of a sequence
+        Start playback of a sequence.
 
-        NOTE: This does NOT block. Use with QTimer to call playNextPoint() periodically.
+        Returns the first point's delay in milliseconds so the caller can
+        set the timer interval accordingly.  playNextPoint() is then called
+        once per timer tick — no internal polling.
 
         Args:
             sequence: Sequence to play
             speed: Speed multiplier (1.0 = normal, 2.0 = double speed, 0.5 = half speed)
             loop: Whether to loop the sequence
+
+        Returns:
+            First point delay in milliseconds (adjusted for speed).
         """
         self.is_playing = True
         self.is_paused = False
@@ -253,47 +257,39 @@ class SequencePlayer:
         self.loop_enabled = loop
         self.current_point_index = 0
         self.current_sequence = sequence
-        self.last_move_time = time.time()
 
         logger.info(f"Starting playback of '{sequence.name}' (speed={speed}x, loop={loop})")
+        return self._current_delay_ms()
 
-    def playNextPoint(self) -> Tuple[bool, int, int]:
+    def playNextPoint(self) -> Tuple[bool, int, int, int]:
         """
-        Play the next point in the sequence (called by QTimer)
+        Execute the current point and advance to the next one.
+
+        Called exactly once per timer tick — the caller sets the timer
+        interval to the delay returned here.
 
         Returns:
-            tuple: (should_continue, point_index, total_points) or (False, 0, 0) if done
+            (should_continue, point_index, total_points, next_delay_ms)
         """
         if not self.is_playing or self.current_sequence is None:
-            return (False, 0, 0)
+            return (False, 0, 0, 0)
 
         if self.is_paused:
-            return (True, self.current_point_index, len(self.current_sequence))
+            return (True, self.current_point_index, len(self.current_sequence), 0)
 
         # Check if we're done with the sequence
         if self.current_point_index >= len(self.current_sequence):
             if self.loop_enabled:
                 logger.info(f"Looping sequence '{self.current_sequence.name}'")
                 self.current_point_index = 0
-                self.last_move_time = time.time()
             else:
                 self.is_playing = False
                 logger.info(f"Playback complete: '{self.current_sequence.name}'")
-                return (False, len(self.current_sequence), len(self.current_sequence))
-
-        # Get current point
-        point = self.current_sequence.points[self.current_point_index]
-
-        # Check if delay has elapsed
-        current_time = time.time()
-        adjusted_delay = point.delay / self.speed_multiplier
-        time_since_last_move = current_time - self.last_move_time
-
-        if time_since_last_move < adjusted_delay:
-            # Still waiting for delay
-            return (True, self.current_point_index, len(self.current_sequence))
+                return (False, len(self.current_sequence), len(self.current_sequence), 0)
 
         # Execute movement
+        point = self.current_sequence.points[self.current_point_index]
+        dwell_delay = self._current_delay_ms()  # this point's dwell time
         logger.info(f"Moving to point {self.current_point_index + 1}/{len(self.current_sequence)}: {point}")
         self.move_callback(
             point.q1, point.q2, point.q3,
@@ -301,11 +297,17 @@ class SequencePlayer:
             point.gripper
         )
 
-        # Move to next point
-        self.last_move_time = current_time
         self.current_point_index += 1
 
-        return (True, self.current_point_index, len(self.current_sequence))
+        return (True, self.current_point_index, len(self.current_sequence), dwell_delay)
+
+    def _current_delay_ms(self) -> int:
+        """Return the current point's delay in ms (speed-adjusted), or 500 ms fallback."""
+        if (self.current_sequence
+                and 0 <= self.current_point_index < len(self.current_sequence)):
+            delay_s = self.current_sequence.points[self.current_point_index].delay
+            return max(int(delay_s / self.speed_multiplier * 1000), 50)
+        return 500
 
     def stop(self) -> None:
         """Stop playback"""

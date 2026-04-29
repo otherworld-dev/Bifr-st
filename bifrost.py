@@ -467,7 +467,7 @@ class BifrostGUI(Ui_MainWindow):
         self._sim_interp_timer.timeout.connect(self._tickSimulationInterpolation)
         self._sim_interp_start = None   # [q1..q6, gripper] start values
         self._sim_interp_end = None     # [q1..q6, gripper] target values
-        self._sim_interp_elapsed = 0.0
+        self._sim_interp_t0 = 0.0       # wall-clock start time
         self._sim_interp_duration = 0.0
 
         # Only setup classic GUI sequence controls if not using modern GUI
@@ -1725,17 +1725,27 @@ class BifrostGUI(Ui_MainWindow):
             speed = self.sequenceSpeedSpinBox.value()
             loop = self.sequenceLoopCheckBox.isChecked()
 
-        if self.sequence_controller.start_playback(speed=speed, loop=loop):
+        first_delay_ms = self.sequence_controller.start_playback(speed=speed, loop=loop)
+        if first_delay_ms:
             self.is_playing_sequence = True
-            self.sequence_timer.start(config.SEQUENCE_TIMER_INTERVAL)
+            # Execute the first point immediately — delay means "dwell
+            # at this point before the next", not "wait before moving here".
+            should_continue, _, _, next_delay_ms = self.sequence_controller.update_playback()
+            if should_continue and next_delay_ms > 0:
+                self.sequence_timer.start(next_delay_ms)
+            else:
+                self.is_playing_sequence = False
 
     def updateSequencePlayback(self):
         """Called by QTimer to advance sequence playback."""
-        should_continue, current, total = self.sequence_controller.update_playback()
+        should_continue, current, total, next_delay_ms = self.sequence_controller.update_playback()
 
         if not should_continue:
             self.sequence_timer.stop()
             self.is_playing_sequence = False
+        elif next_delay_ms > 0:
+            # Adjust timer interval for the next point's delay
+            self.sequence_timer.setInterval(next_delay_ms)
 
     def pauseSequence(self):
         """Pause/resume sequence playback. Delegates to SequenceController."""
@@ -1933,24 +1943,36 @@ class BifrostGUI(Ui_MainWindow):
     def _onSimulationSequenceMove(self, q1, q2, q3, q4, q5, q6, gripper, duration):
         """Start interpolated movement to target position in simulation mode."""
         SIM_INTERP_FPS = 30
+
+        # Snap spinboxes to the previous target so every animation starts
+        # from an exact position (no accumulated drift).
+        if self._sim_interp_end is not None:
+            spinboxes = [
+                self.SpinBoxArt1, self.SpinBoxArt2, self.SpinBoxArt3,
+                self.SpinBoxArt4, self.SpinBoxArt5, self.SpinBoxArt6,
+                self.SpinBoxGripper
+            ]
+            for i, spinbox in enumerate(spinboxes):
+                val = self._sim_interp_end[i]
+                spinbox.setValue(int(val) if isinstance(spinbox, QtWidgets.QSpinBox) else val)
+            self._updateSimulationVisualization()
+
         self._sim_interp_start = [
             self.SpinBoxArt1.value(), self.SpinBoxArt2.value(), self.SpinBoxArt3.value(),
             self.SpinBoxArt4.value(), self.SpinBoxArt5.value(), self.SpinBoxArt6.value(),
             self.SpinBoxGripper.value()
         ]
         self._sim_interp_end = [q1, q2, q3, q4, q5, q6, gripper]
-        self._sim_interp_elapsed = 0.0
-        # Use 80% of the delay so animation finishes before the next point fires
-        self._sim_interp_duration = max(duration * 0.8, 0.1)
+        self._sim_interp_duration = max(duration, 0.1)
+        # Use wall-clock time instead of frame counting to avoid float drift
+        self._sim_interp_t0 = time.time()
         interval_ms = int(1000 / SIM_INTERP_FPS)
         self._sim_interp_timer.start(interval_ms)
 
     def _tickSimulationInterpolation(self):
         """Advance one frame of simulation interpolation."""
-        SIM_INTERP_FPS = 30
-        dt = 1.0 / SIM_INTERP_FPS
-        self._sim_interp_elapsed += dt
-        t = min(self._sim_interp_elapsed / self._sim_interp_duration, 1.0)
+        elapsed = time.time() - self._sim_interp_t0
+        t = min(elapsed / self._sim_interp_duration, 1.0)
         # Smooth-step for nicer easing
         t = t * t * (3.0 - 2.0 * t)
 

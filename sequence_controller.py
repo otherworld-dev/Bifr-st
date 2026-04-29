@@ -358,7 +358,7 @@ class SequenceController:
             logger.error(f"Failed to import CSV: {e}")
             return False, f"Import failed: {str(e)}"
 
-    def start_playback(self, speed: float = 1.0, loop: bool = False) -> bool:
+    def start_playback(self, speed: float = 1.0, loop: bool = False) -> int:
         """
         Start sequence playback.
 
@@ -367,21 +367,21 @@ class SequenceController:
             loop: Whether to loop the sequence
 
         Returns:
-            True if playback started, False if empty sequence
+            First point delay in ms (>0) if playback started, 0 if failed.
         """
         if len(self.recorder.current_sequence) == 0:
             logger.warning("Cannot play empty sequence")
-            return False
+            return 0
 
         if self.playback_state.is_playing:
             logger.warning("Sequence already playing")
-            return False
+            return 0
 
         # Create player with movement callback
         self.player = seq_rec.SequencePlayer(self._execute_movement)
 
-        # Start playback
-        self.player.start_playback(
+        # Start playback — returns first point's delay in ms
+        first_delay_ms = self.player.start_playback(
             self.recorder.current_sequence,
             speed=speed,
             loop=loop
@@ -401,25 +401,25 @@ class SequenceController:
         self._update_button_states(playing=True)
 
         logger.info(f"Started sequence playback (speed={speed}x, loop={loop})")
-        return True
+        return first_delay_ms
 
-    def update_playback(self) -> Tuple[bool, int, int]:
+    def update_playback(self) -> Tuple[bool, int, int, int]:
         """
-        Advance playback by one tick (called by timer).
+        Execute the current point and advance (called by timer).
 
         Returns:
-            Tuple of (should_continue, current_index, total_points)
+            (should_continue, current_index, total_points, next_delay_ms)
         """
         if not self.player:
-            return (False, 0, 0)
+            return (False, 0, 0, 0)
 
-        should_continue, current, total = self.player.playNextPoint()
+        should_continue, current, total, next_delay = self.player.playNextPoint()
 
         if not should_continue:
             self.stop_playback()
             logger.info("Sequence playback completed")
 
-        return (should_continue, current, total)
+        return (should_continue, current, total, next_delay)
 
     def pause_playback(self) -> None:
         """Toggle pause/resume playback."""
@@ -504,16 +504,22 @@ class SequenceController:
             f"q4={q4:.1f}°, q5={q5:.1f}°, q6={q6:.1f}°, grip={gripper}"
         )
 
-        # In simulation mode, delegate to simulation callback instead of serial
-        if self.simulation_mode and self.simulation_move_callback:
-            # Calculate animation duration from next point's delay
-            duration = 0.5  # default fallback in seconds
+        # Always animate the visualiser so the 3D view updates during playback.
+        # Animation duration = the current point's delay (the dwell time at this
+        # position before the next point fires).
+        if self.simulation_move_callback:
+            duration = 0.5  # fallback
             if self.player and self.player.current_sequence:
-                next_idx = self.player.current_point_index + 1
+                # move_callback fires BEFORE index is incremented, so
+                # current_point_index still points at the executing point.
+                idx = self.player.current_point_index
                 seq = self.player.current_sequence
-                if next_idx < len(seq):
-                    duration = seq.points[next_idx].delay / self.player.speed_multiplier
+                if 0 <= idx < len(seq):
+                    duration = seq.points[idx].delay / self.player.speed_multiplier
             self.simulation_move_callback(q1, q2, q3, q4, q5, q6, gripper, duration)
+
+        # In simulation-only mode, skip sending serial commands
+        if self.simulation_mode:
             return
 
         # Calculate differential motor positions
