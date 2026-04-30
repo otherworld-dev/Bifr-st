@@ -24,8 +24,9 @@ JOINT_TO_DRIVES = {
     'Art6': [6],
 }
 
-# Default config.g path
-DEFAULT_CONFIG_G_PATH = paths.get_data_dir() / 'sys' / 'config.g'
+# Default config.g path — firmware configs are in 'Firmware Configs/' (dev)
+# or 'Firmware Configs/' next to the exe (frozen)
+DEFAULT_CONFIG_G_PATH = paths.get_exe_dir() / 'Firmware Configs' / 'config.g'
 
 # Regex to match M569 lines: M569 P<drive> S<direction> [rest of line]
 _M569_PATTERN = re.compile(r'^(\s*M569\s+P)(\d+)(\s+S)(\d+)(.*)', re.MULTILINE)

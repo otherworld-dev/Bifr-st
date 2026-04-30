@@ -953,7 +953,7 @@ class CalibrationPanel(QtWidgets.QWidget):
                         logger.warning(f"Not connected - M569 P{drive} not sent")
 
             # Always persist to config.g (even when not connected)
-            config_g_path = paths.get_data_dir() / 'sys' / 'config.g'
+            config_g_path = paths.get_exe_dir() / 'Firmware Configs' / 'config.g'
             set_joint_direction(config_g_path, joint_name, direction)
 
             if commands_sent > 0:
@@ -998,7 +998,7 @@ class CalibrationPanel(QtWidgets.QWidget):
     def load_current_calibration(self):
         """Load direction settings from config.g M569 commands"""
         try:
-            config_g_path = paths.get_data_dir() / 'sys' / 'config.g'
+            config_g_path = paths.get_exe_dir() / 'Firmware Configs' / 'config.g'
             directions = get_joint_directions(config_g_path)
 
             for joint_name, direction in directions.items():
