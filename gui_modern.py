@@ -60,7 +60,7 @@ class ModernMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Bifrost - ThorRR Robot Control")
-        self.setMinimumSize(1200, 750)
+        self.setMinimumSize(1024, 600)
 
         # Create central widget
         self.centralwidget = QWidget()
@@ -98,7 +98,7 @@ class ModernMainWindow(QMainWindow):
         content_splitter.setSizes([480, 720])
 
         # Set minimum width for left panel so it can't be collapsed
-        self.mode_stack.setMinimumWidth(400)
+        self.mode_stack.setMinimumWidth(350)
 
         # Prevent splitter panels from collapsing
         content_splitter.setCollapsible(0, False)  # Left panel
@@ -2127,7 +2127,7 @@ class Ui_MainWindow:
         content_splitter.setSizes([480, 720])
 
         # Set minimum width for left panel so it can't be collapsed
-        self.mode_stack.setMinimumWidth(400)
+        self.mode_stack.setMinimumWidth(350)
 
         # Prevent splitter panels from collapsing
         content_splitter.setCollapsible(0, False)  # Left panel

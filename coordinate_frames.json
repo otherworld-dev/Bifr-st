@@ -37,12 +37,12 @@
       "description": "Default tool (no offset)"
     },
     {
-      "name": "test1",
+      "name": "Gripper",
       "frame_type": "tool",
       "position": [
         0.0,
         0.0,
-        10.0
+        115.0
       ],
       "orientation_quaternion": [
         1.0,
@@ -54,25 +54,7 @@
       "description": ""
     }
   ],
-  "workpieces": [
-    {
-      "name": "test",
-      "frame_type": "workpiece",
-      "position": [
-        219.548747985575,
-        -2.9572017094109374e-14,
-        -8.797689320685219
-      ],
-      "orientation_quaternion": [
-        0.9948653842650511,
-        0.09904456965978921,
-        -0.020707257671017828,
-        0.0020615265716330527
-      ],
-      "parent_frame": "base",
-      "description": ""
-    }
-  ],
+  "workpieces": [],
   "active_frame": "base",
-  "active_tool": "default_tool"
+  "active_tool": "Gripper"
 }
