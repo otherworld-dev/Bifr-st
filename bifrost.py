@@ -614,6 +614,29 @@ class BifrostGUI(Ui_MainWindow):
 
                 self.frame_controller.on_frames_updated = _on_frames_updated_all
 
+                # Chain tool list updates to axis column tool selector
+                _tool_panel_cb = self.frame_controller.on_tools_updated
+
+                def _on_tools_updated_all(tools):
+                    if _tool_panel_cb:
+                        _tool_panel_cb(tools)
+                    self.axis_column.update_tools(tools)
+
+                self.frame_controller.on_tools_updated = _on_tools_updated_all
+
+                # Populate initial tool list and connect selection signal
+                tools = self.frame_controller.get_tools()
+                self.axis_column.update_tools(tools)
+                self.axis_column.tool_changed.connect(self._onAxisColumnToolChanged)
+
+                # Auto-select first non-default tool if one exists
+                user_tools = [t for t in tools if t != "default_tool"]
+                if user_tools:
+                    self.frame_controller.select_tool(user_tools[0])
+                    self.axis_column.tool_combo.blockSignals(True)
+                    self.axis_column.tool_combo.setCurrentText(user_tools[0])
+                    self.axis_column.tool_combo.blockSignals(False)
+
         # --- Addon System ---
         self.bifrost_api = BifrostAPI(
             robot_controller=self.robot_controller,
@@ -1279,6 +1302,13 @@ class BifrostGUI(Ui_MainWindow):
                 self.position_canvas.update_robot(joint_angles)
             except Exception as e:
                 logger.warning(f"Could not sync base transform to visualizer: {e}")
+
+    def _onAxisColumnToolChanged(self, tool_name: str):
+        """Handle tool selection from axis column combo box."""
+        if tool_name == "None":
+            self.frame_controller.select_tool("default_tool")
+        else:
+            self.frame_controller.select_tool(tool_name)
 
     def _onToolChanged(self, tool_name: str):
         """Handle active tool change — update visualizer and Cartesian display."""
@@ -2327,7 +2357,8 @@ class BifrostGUI(Ui_MainWindow):
             (p.q1, p.q2, p.q3, p.q4, p.q5, p.q6)
             for p in seq.points
         ]
-        tcp_points = compute_trajectory_from_waypoints(waypoints)
+        tool_offset = canvas._tool_offset if hasattr(canvas, '_tool_offset') else None
+        tcp_points = compute_trajectory_from_waypoints(waypoints, tool_offset=tool_offset)
         canvas.set_sequence_preview(tcp_points)
 
     def _onSequenceButtonStateChanged(self, button_name, enabled):

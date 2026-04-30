@@ -21,7 +21,7 @@ _JOINT_NAMES = ('art1', 'art2', 'art3', 'art4', 'art5', 'art6')
 _MIN_JOINT_CHANGE_FOR_INTERP = 1.0
 
 
-def _interpolate_tcp_trajectory(snapshots) -> list:
+def _interpolate_tcp_trajectory(snapshots, tool_offset=None) -> list:
     """
     Build a dense TCP trajectory by linearly interpolating joint angles
     between consecutive snapshots and computing FK at each subdivision.
@@ -31,6 +31,8 @@ def _interpolate_tcp_trajectory(snapshots) -> list:
 
     Args:
         snapshots: List of PositionSnapshot objects (len >= 2)
+        tool_offset: Optional 4x4 numpy transform applied after FK to get
+                     tool tip position instead of flange position.
 
     Returns:
         List of (x, y, z, timestamp) tuples
@@ -47,12 +49,22 @@ def _interpolate_tcp_trajectory(snapshots) -> list:
                 trajectory.append((*tcp, s.timestamp))
         return trajectory
 
+    has_tool = tool_offset is not None and not np.allclose(tool_offset, np.eye(4))
+
+    def _tcp_from_joints(joints):
+        """Compute TCP (or tool tip) position from joint angles."""
+        if has_tool:
+            transforms = fk.compute_all_joint_transforms(*joints)
+            tip = transforms[6] @ tool_offset
+            return tuple(tip[:3, 3])
+        return fk.compute_tcp_position_only(*joints)
+
     n_steps = getattr(config, 'TRAJECTORY_INTERPOLATION_STEPS', 20)
     trajectory = []
 
     # Get joint angles for first snapshot and add its TCP
     prev_joints = np.array([snapshots[0].get(j, 0.0) for j in _JOINT_NAMES])
-    tcp = fk.compute_tcp_position_only(*prev_joints)
+    tcp = _tcp_from_joints(prev_joints)
     if tcp:
         trajectory.append((*tcp, snapshots[0].timestamp))
 
@@ -65,7 +77,7 @@ def _interpolate_tcp_trajectory(snapshots) -> list:
         delta = np.abs(curr_joints - prev_joints).sum()
         if delta < _MIN_JOINT_CHANGE_FOR_INTERP:
             # Stationary or near-stationary — just add the endpoint
-            tcp = fk.compute_tcp_position_only(*curr_joints)
+            tcp = _tcp_from_joints(curr_joints)
             if tcp:
                 trajectory.append((*tcp, t1))
         else:
@@ -74,7 +86,7 @@ def _interpolate_tcp_trajectory(snapshots) -> list:
                 alpha = step / n_steps
                 interp_joints = prev_joints + alpha * (curr_joints - prev_joints)
                 interp_time = t0 + alpha * (t1 - t0)
-                tcp = fk.compute_tcp_position_only(*interp_joints)
+                tcp = _tcp_from_joints(interp_joints)
                 if tcp:
                     trajectory.append((*tcp, interp_time))
 
@@ -83,7 +95,7 @@ def _interpolate_tcp_trajectory(snapshots) -> list:
     return trajectory
 
 
-def compute_trajectory_from_waypoints(waypoints) -> list:
+def compute_trajectory_from_waypoints(waypoints, tool_offset=None) -> list:
     """
     Compute a dense TCP trajectory from a list of joint-angle waypoints.
 
@@ -92,6 +104,7 @@ def compute_trajectory_from_waypoints(waypoints) -> list:
 
     Args:
         waypoints: List of (q1, q2, q3, q4, q5, q6) tuples (degrees)
+        tool_offset: Optional 4x4 numpy transform for tool tip tracking
 
     Returns:
         List of (x, y, z) tuples representing the dense TCP path
@@ -112,11 +125,20 @@ def compute_trajectory_from_waypoints(waypoints) -> list:
     except ImportError:
         return []
 
+    has_tool = tool_offset is not None and not np.allclose(tool_offset, np.eye(4))
+
+    def _tcp_from_joints(joints):
+        if has_tool:
+            transforms = fk.compute_all_joint_transforms(*joints)
+            tip = transforms[6] @ tool_offset
+            return tuple(tip[:3, 3])
+        return fk.compute_tcp_position_only(*joints)
+
     n_steps = getattr(config, 'TRAJECTORY_INTERPOLATION_STEPS', 20)
     trajectory = []
 
     prev = np.array(waypoints[0], dtype=float)
-    tcp = fk.compute_tcp_position_only(*prev)
+    tcp = _tcp_from_joints(prev)
     if tcp:
         trajectory.append(tcp)
 
@@ -125,14 +147,14 @@ def compute_trajectory_from_waypoints(waypoints) -> list:
         delta = np.abs(curr - prev).sum()
 
         if delta < _MIN_JOINT_CHANGE_FOR_INTERP:
-            tcp = fk.compute_tcp_position_only(*curr)
+            tcp = _tcp_from_joints(curr)
             if tcp:
                 trajectory.append(tcp)
         else:
             for step in range(1, n_steps + 1):
                 alpha = step / n_steps
                 interp = prev + alpha * (curr - prev)
-                tcp = fk.compute_tcp_position_only(*interp)
+                tcp = _tcp_from_joints(interp)
                 if tcp:
                     trajectory.append(tcp)
 
@@ -358,7 +380,7 @@ class PositionHistory:
         latest_snapshot = self.history[-1]
         return latest_snapshot.positions.copy()
 
-    def get_tcp_trajectory(self, window_seconds=60, interpolate=True):
+    def get_tcp_trajectory(self, window_seconds=60, interpolate=True, tool_offset=None):
         """
         Get TCP trajectory for the specified time window.
 
@@ -369,6 +391,7 @@ class PositionHistory:
         Args:
             window_seconds: Time window in seconds (0 = all history)
             interpolate: If True, subdivide segments via joint interpolation + FK
+            tool_offset: Optional 4x4 numpy transform for tool tip tracking
 
         Returns:
             List of tuples [(x, y, z, timestamp), ...] representing TCP positions
@@ -394,7 +417,7 @@ class PositionHistory:
                     trajectory.append((x, y, z, snapshot.timestamp))
             return trajectory
 
-        return _interpolate_tcp_trajectory(snapshots)
+        return _interpolate_tcp_trajectory(snapshots, tool_offset=tool_offset)
 
     def get_statistics(self, joint_name):
         """

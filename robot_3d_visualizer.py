@@ -2446,7 +2446,7 @@ class Robot3DCanvas(gl.GLViewWidget):
                 return
 
             # OPTIMIZATION: Check if data actually changed
-            tcp_trajectory = position_history.get_tcp_trajectory(window_size) if self.show_trajectory else []
+            tcp_trajectory = position_history.get_tcp_trajectory(window_size, tool_offset=self._tool_offset) if self.show_trajectory else []
             options_changed = options != self._last_options
             if not self._has_data_changed(current_angles, len(tcp_trajectory)) and not self.auto_rotate and not options_changed:
                 return

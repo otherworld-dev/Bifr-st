@@ -521,6 +521,8 @@ class AxisControlColumn(QFrame):
     movement_type_changed = pyqtSignal(str)  # "G0", "G1"
     # Signal emitted when feedrate changes
     feedrate_changed = pyqtSignal(float)
+    # Signal emitted when tool selection changes
+    tool_changed = pyqtSignal(str)  # tool name
 
     # Control mode definitions
     JOINT_MODE = "joint"
@@ -708,6 +710,27 @@ class AxisControlColumn(QFrame):
         layout.addWidget(move_frame)
 
         self.current_movement_type = "G0"
+
+        # Tool frame selector
+        tool_frame = QFrame()
+        tool_frame.setStyleSheet("background: #e8e0f0; border-radius: 3px;")
+        tool_layout = QVBoxLayout(tool_frame)
+        tool_layout.setContentsMargins(3, 3, 3, 3)
+        tool_layout.setSpacing(2)
+
+        tool_heading = QLabel("Tool")
+        tool_heading.setStyleSheet("font-size: 7pt; font-weight: bold; color: #555;")
+        tool_heading.setAlignment(Qt.AlignCenter)
+        tool_layout.addWidget(tool_heading)
+
+        self.tool_combo = QComboBox()
+        self.tool_combo.setFixedHeight(20)
+        self.tool_combo.setStyleSheet("font-size: 7pt;")
+        self.tool_combo.addItem("None")
+        self.tool_combo.currentTextChanged.connect(self._on_tool_changed)
+        tool_layout.addWidget(self.tool_combo)
+
+        layout.addWidget(tool_frame)
 
         layout.addStretch()
 
@@ -939,6 +962,22 @@ class AxisControlColumn(QFrame):
     def get_movement_type(self):
         """Get current movement type (G0 or G1)"""
         return self.current_movement_type
+
+    def _on_tool_changed(self, text):
+        """Handle tool combo box selection change"""
+        if text:
+            self.tool_changed.emit(text)
+
+    def update_tools(self, tools):
+        """Update tool combo box items, preserving current selection."""
+        current = self.tool_combo.currentText()
+        self.tool_combo.blockSignals(True)
+        self.tool_combo.clear()
+        self.tool_combo.addItem("None")
+        self.tool_combo.addItems(tools)
+        if current in tools:
+            self.tool_combo.setCurrentText(current)
+        self.tool_combo.blockSignals(False)
 
     def get_feedrate(self):
         """Get current feedrate value"""
