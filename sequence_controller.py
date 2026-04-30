@@ -17,6 +17,7 @@ from dataclasses import dataclass
 import config
 import differential_kinematics as diff_kin
 from command_builder import CommandBuilder
+from gripper_controller import GripperController
 import sequence_recorder as seq_rec
 
 logger = logging.getLogger(__name__)
@@ -536,9 +537,8 @@ class SequenceController:
         if self.command_sender:
             self.command_sender.send(command, show_in_console=False)
 
-        # Move gripper if needed
-        if gripper > 0:
-            self._execute_gripper_move(gripper)
+        # Move gripper
+        self._execute_gripper_move(gripper)
 
     def _execute_gripper_move(self, gripper_percent: float) -> None:
         """
@@ -547,9 +547,8 @@ class SequenceController:
         Args:
             gripper_percent: Gripper position 0-100%
         """
-        # Convert percent to PWM then to servo angle
-        pwm_value = (config.GRIPPER_PWM_MAX / config.GRIPPER_PERCENT_MAX) * gripper_percent
-        servo_angle = int((pwm_value / 255.0) * 180.0)
+        # Convert percent to servo angle using calibrated PWM range
+        servo_angle = GripperController.percent_to_servo_angle(gripper_percent)
 
         command = f"M280 P0 S{servo_angle}"
 
