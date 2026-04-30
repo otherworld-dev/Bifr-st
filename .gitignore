@@ -15,9 +15,6 @@ build/
 *.swo
 
 
-# Claude Code
-.claude/
-
 # Local data (not project code)
 STLs/Downloads/
 Bifrost issues/

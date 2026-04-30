@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pyuic5:*)",
+      "Bash(python:*)",
+      "Bash(dir:*)",
+      "Bash(git add:*)",
+      "Bash(git log:*)",
+      "WebFetch(domain:hackaday.io)",
+      "Bash(copy robot_3d_visualizer.py robot_3d_visualizer_matplotlib_backup.py)",
+      "Bash(timeout 5 python:*)",
+      "Bash(timeout:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nAdd simulation mode for offline robot control\n\nImplements complete simulation mode allowing robot control and\nrecording/playback without physical hardware connected.\n\nNew features:\n- SimulatedSerialManager: Mock serial layer with G-code parsing\n- SimulatedSerialThread: QTimer-based polling (no hardware required)\n- Instant position updates for fast waypoint recording\n- Full RRF protocol compatibility (G0/G1/G28/M114/M119/M42/M112)\n- Config flag USE_SIMULATION_MODE to toggle real/simulated hardware\n- GUI automatically disables port selection in simulation mode\n- Console displays simulation status on connection\n\nArchitecture:\n- Drop-in replacements for SerialManager and SerialThread\n- Zero changes needed to controllers, kinematics, or visualization\n- Uses existing ConnectionManager dependency injection\n- Position recording and CSV playback work identically\n\nFiles:\n- simulated_hardware.py: New simulated hardware layer (530 lines)\n- config.py: Add USE_SIMULATION_MODE flag\n- bifrost.py: Conditional hardware instantiation based on config\n\nTesting:\n- Successfully launches without hardware (verified in logs)\n- SimulatedSerialManager initializes correctly\n- Port selection disabled in simulation mode\n- Ready for slider testing and CSV recording/playback\nEOF\n)\")",
+      "Bash(grep:*)",
+      "Bash(tasklist:*)",
+      "Bash(findstr:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
