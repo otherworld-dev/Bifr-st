@@ -18,6 +18,11 @@ build/
 # Claude Code
 .claude/
 
+# Local data (not project code)
+STLs/Downloads/
+Bifrost issues/
+Bifrost-v1.0.0-win64.zip
+
 # Firmware/Board config
 sys/
 
