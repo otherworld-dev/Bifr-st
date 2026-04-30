@@ -43,6 +43,7 @@ STL_FILES = {
     'art4': 'Thor - Art4.stl',
     'art5': 'Thor - Art5.stl',
     'gripper': 'Thor - Gripper.stl',
+    'gripper_closed': 'Thor - Gripper Closed.stl',
 }
 
 # Cache for loaded STL meshes
@@ -155,16 +156,21 @@ def get_stl_calibration():
         'art4': {'offset': [0, 0, 0], 'rotation': [0, 0, 0], 'scale': 1.0},
         'art5': {'offset': [0, 0, 0], 'rotation': [0, 0, 0], 'scale': 1.0},
         'gripper': {'offset': [0, 0, 0], 'rotation': [0, 0, 0], 'scale': 1.0},
+        'gripper_closed': {'offset': [0, 0, 0], 'rotation': [0, 0, 0], 'scale': 1.0},
     }
 
     if config_path.exists():
         try:
             with open(config_path, 'r') as f:
                 loaded = json.load(f)
-            # Merge with defaults
-            for key in default_calibration:
-                if key in loaded:
+            # Merge loaded values into defaults (supports extra keys from file too)
+            for key in loaded:
+                if key.startswith('_'):
+                    continue  # skip comments
+                if key in default_calibration:
                     default_calibration[key].update(loaded[key])
+                else:
+                    default_calibration[key] = loaded[key]
             logger.info("Loaded STL calibration from config")
         except Exception as e:
             logger.warning(f"Error loading STL calibration: {e}")
@@ -598,6 +604,7 @@ class Robot3DCanvas(gl.GLViewWidget):
         self.tool_direction_item = None
         self.base_front_item = None
         self.robot_mesh_items = []  # List of 3D mesh items for realistic robot
+        self.gripper_closed = False  # Gripper state for STL swap
 
         # Setup initial view
         self.setup_3d_view()
@@ -1170,6 +1177,7 @@ class Robot3DCanvas(gl.GLViewWidget):
         # art5    -> transforms[5] (after J1+J2+J3+J4+J5)
         # gripper -> transforms[6] (after all joints - TCP frame)
 
+        gripper_key = 'gripper_closed' if self.gripper_closed else 'gripper'
         stl_mapping = [
             ('base', 0, colors['accent']),
             ('art1', 1, colors['body']),
@@ -1177,7 +1185,7 @@ class Robot3DCanvas(gl.GLViewWidget):
             ('art3', 3, colors['body_dark']),
             ('art4', 4, colors['body']),
             ('art5', 5, colors['body_dark']),
-            ('gripper', 6, colors['gripper']),
+            (gripper_key, 6, colors['gripper']),
         ]
 
         for stl_name, transform_idx, color in stl_mapping:
@@ -2164,6 +2172,7 @@ class Robot3DCanvas(gl.GLViewWidget):
             ('art4', colors['body']),
             ('art5', colors['body_dark']),
             ('gripper', colors['gripper']),
+            ('gripper_closed', colors['gripper']),
         ]
 
         for stl_name, color in stl_mapping:
@@ -2269,10 +2278,17 @@ class Robot3DCanvas(gl.GLViewWidget):
             'art4': 4,
             'art5': 5,
             'gripper': 6,
+            'gripper_closed': 6,
         }
 
         # Update each mesh transform (pre-multiply by base-in-world)
         for stl_name, mesh_item in self._persistent_mesh_items.items():
+            # Toggle gripper mesh visibility based on state
+            if stl_name == 'gripper':
+                mesh_item.setVisible(not self.gripper_closed)
+            elif stl_name == 'gripper_closed':
+                mesh_item.setVisible(self.gripper_closed)
+
             transform_idx = transform_indices.get(stl_name, 0)
             transform_4x4 = B @ transforms[transform_idx]
 

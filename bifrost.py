@@ -932,6 +932,9 @@ class BifrostGUI(Ui_MainWindow):
 # Gripper Functions - delegate to GripperController
     def MoveGripper(self):
         """Move gripper to specified position - delegates to controller"""
+        if self.SimulationModeCheckBox.isChecked():
+            self._updateSimulationVisualization()
+            return
         self.gripper_controller.move(self.SpinBoxGripper.value())
 
     def SliderUpdateGripper(self):
@@ -969,6 +972,12 @@ class BifrostGUI(Ui_MainWindow):
 
     def setGripperAndMove(self, value):
         """Set gripper to specific value and execute movement - delegates to controller"""
+        if self.SimulationModeCheckBox.isChecked():
+            self.SpinBoxGripper.setValue(int(value))
+            if hasattr(self, 'axis_column') and "Gripper" in self.axis_column.rows:
+                self.axis_column.rows["Gripper"].set_value(value)
+            self._updateSimulationVisualization()
+            return
         preset = 'closed' if value == 0 else 'open'
         self.gripper_controller.move_to_preset(preset)
         # Update axis row display
@@ -1266,6 +1275,7 @@ class BifrostGUI(Ui_MainWindow):
                     self.SpinBoxArt3.value(), self.SpinBoxArt4.value(),
                     self.SpinBoxArt5.value(), self.SpinBoxArt6.value()
                 ]
+                self.position_canvas.gripper_closed = self.SpinBoxGripper.value() == 0
                 self.position_canvas.update_robot(joint_angles)
             except Exception as e:
                 logger.warning(f"Could not sync base transform to visualizer: {e}")
@@ -1925,6 +1935,7 @@ class BifrostGUI(Ui_MainWindow):
 
         # Update 3D visualization
         if hasattr(self, 'position_canvas') and self.position_canvas:
+            self.position_canvas.gripper_closed = self.SpinBoxGripper.value() == 0
             self.position_canvas.update_robot(joint_angles)
 
         # Update axis column value labels so the sidebar reflects current positions

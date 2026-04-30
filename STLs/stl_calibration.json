@@ -40,5 +40,10 @@
         "offset": [-130, -90, -43],
         "rotation": [90, 0, 270],
         "scale": 1.0
+    },
+    "gripper_closed": {
+        "offset": [-2, -5, -12],
+        "rotation": [90, 0, 270],
+        "scale": 1.0
     }
 }
