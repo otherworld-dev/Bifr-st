@@ -135,13 +135,33 @@ class SequenceController:
         self.movement_type = movement_type
         self.feedrate = feedrate
 
+    def estimate_travel_time(self, prev: JointPositions, curr: JointPositions) -> float:
+        """
+        Estimate travel time between two joint positions based on max joint speeds.
+
+        For G0 (rapid), each axis moves independently at its max speed — the
+        slowest axis determines total time. Returns time in seconds including
+        a settling buffer.
+        """
+        joints_prev = [prev.q1, prev.q2, prev.q3, prev.q4, prev.q5, prev.q6]
+        joints_curr = [curr.q1, curr.q2, curr.q3, curr.q4, curr.q5, curr.q6]
+
+        max_time = 0.0
+        for i, max_speed in enumerate(config.JOINT_MAX_SPEEDS):
+            delta = abs(joints_curr[i] - joints_prev[i])
+            if delta > 0 and max_speed > 0:
+                max_time = max(max_time, delta / max_speed)
+
+        return round(max_time + config.SEQUENCE_SETTLE_TIME, 2)
+
     def record_point(self, positions: JointPositions, delay: float = 1.0) -> str:
         """
         Record a point to the sequence.
 
         Args:
             positions: Joint positions to record
-            delay: Delay before this point during playback
+            delay: Delay before this point during playback (auto-calculated
+                   from joint travel distance if there is a previous point)
 
         Returns:
             Display text for the recorded point
@@ -149,6 +169,16 @@ class SequenceController:
         # Start recording if not already
         if not self.recorder.is_recording:
             self.recorder.start_recording("Current Sequence")
+
+        # Auto-calculate delay from joint distance to previous point
+        seq = self.recorder.current_sequence
+        if len(seq) > 0:
+            prev_pt = seq.points[-1]
+            prev_pos = JointPositions(
+                prev_pt.q1, prev_pt.q2, prev_pt.q3,
+                prev_pt.q4, prev_pt.q5, prev_pt.q6
+            )
+            delay = max(delay, self.estimate_travel_time(prev_pos, positions))
 
         # Record the point
         self.recorder.record_point(

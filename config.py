@@ -44,6 +44,11 @@ LOGGING_INTERVAL_POSITIONS = 50  # Log position every Nth update - minimized log
 SEQUENCE_SPEED_MIN = 0.1
 SEQUENCE_SPEED_MAX = 10.0
 
+# Max joint speeds in deg/s (from firmware M203, converted from deg/min)
+# Used to auto-calculate realistic delays when recording sequences
+JOINT_MAX_SPEEDS = [33.3, 13.3, 13.3, 33.3, 83.3, 83.3]  # J1-J6
+SEQUENCE_SETTLE_TIME = 0.3  # Extra seconds added after each move for settling
+
 # ========== GUI Layout (pixels) ==========
 # Sequence Programmer panel
 SEQUENCE_PANEL_X = 910
