@@ -17,9 +17,9 @@ M550 P"Thor"                                                             ; set p
 
 ; Drives
 M569 P0 S0 T1.0:1.0:0.2:0.2                                              ; physical drive 0 goes forwards using A4988 driver timings
-M569 P1 S0 T1.0:1.0:0.2:0.2                                              ; physical drive 1 goes forwards using A4988 driver timings
-M569 P2 S0 T1.0:1.0:0.2:0.2                                              ; physical drive 2 goes forwards using A4988 driver timings
-M569 P3 S0 T1.0:1.0:0.2:0.2                                              ; physical drive 3 goes forwards using A4988 driver timings
+M569 P1 S1 T1.0:1.0:0.2:0.2                                              ; physical drive 1 goes forwards using A4988 driver timings
+M569 P2 S1 T1.0:1.0:0.2:0.2                                              ; physical drive 2 goes forwards using A4988 driver timings
+M569 P3 S1 T1.0:1.0:0.2:0.2                                              ; physical drive 3 goes forwards using A4988 driver timings
 M569 P4 S1 T1.0:1.0:0.2:0.2                                              ; physical drive 4 goes forwards using A4988 driver timings
 M569 P5 S1 T1.0:1.0:0.2:0.2                                              ; physical drive 5 goes forwards using A4988 driver timings
 M569 P6 S1 T1.0:1.0:0.2:0.2                                              ; physical drive 6 goes forwards using A4988 driver timings

@@ -15,6 +15,11 @@ build/
 *.swo
 
 
+# Claude Code
+.claude/
+CLAUDE.md
+.claudeignore
+
 # Local data (not project code)
 STLs/Downloads/
 Bifrost issues/
